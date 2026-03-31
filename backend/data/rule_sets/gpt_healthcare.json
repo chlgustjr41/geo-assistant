@@ -1,0 +1,17 @@
+{
+  "name": "Healthcare General v1 (GPT)",
+  "engine_model": "gpt-4o-mini",
+  "topic_domain": "healthcare",
+  "filtered_rules": [
+    "Open each article with a direct answer summary (2-3 sentences) that a search AI can extract verbatim as a featured snippet.",
+    "Use numbered lists for any process with 3+ steps - GPT models heavily cite structured procedural content.",
+    "Include at least one comparison table (e.g., care type vs. cost vs. eligibility) to increase citation probability.",
+    "Cite named organizations and programs explicitly: 'According to the AARP Public Policy Institute...' or 'Medicare guidelines state...'",
+    "Add a 'Quick Facts' box at the top with 4-6 bullet points covering the most searched data points on the topic.",
+    "Use subheadings that contain the exact phrasing of common search queries to maximize matching with AI-generated queries.",
+    "Include cost ranges with regional context (e.g., 'national average $X, ranging from $Y in rural areas to $Z in urban areas').",
+    "End sections with a clear 'Next Step' or 'What To Do Now' callout to signal actionability.",
+    "Weave in caregiver-specific terminology (respite, ADLs, care coordination) that aligns with how professionals search.",
+    "Include publication/review date and author credentials prominently to satisfy GPT's recency and authority signals."
+  ]
+}

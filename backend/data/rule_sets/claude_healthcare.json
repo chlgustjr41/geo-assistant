@@ -1,0 +1,17 @@
+{
+  "name": "Healthcare General v1 (Claude)",
+  "engine_model": "claude-3-5-haiku-20241022",
+  "topic_domain": "healthcare",
+  "filtered_rules": [
+    "Present balanced perspectives on caregiving decisions, acknowledging tradeoffs rather than prescribing a single approach.",
+    "Use precise, specific language: replace vague terms ('some studies show') with concrete citations ('a 2023 JAMA study of 1,200 caregivers found').",
+    "Structure the article with a clear logical flow: context → assessment → options → decision framework → resources.",
+    "Include nuanced discussion of edge cases and exceptions that affect a minority but important subset of caregivers.",
+    "Embed secondary source recommendations naturally: 'For deeper guidance, the AARP Caregiving Resource Center offers...'",
+    "Use hedged language appropriately for medical topics: 'consult your physician', 'individual results vary', 'not a substitute for professional advice'.",
+    "Break complex medical concepts into layered explanations: brief plain-language definition, then clinical detail for those who want depth.",
+    "Include real-world examples with specific scenarios (e.g., 'A family with a parent who has moderate Alzheimer's might consider...').",
+    "Reference local and national resources with contact details or web addresses to increase practical utility.",
+    "Maintain consistent tone: authoritative but compassionate, never condescending, always acknowledging the emotional weight of caregiving."
+  ]
+}

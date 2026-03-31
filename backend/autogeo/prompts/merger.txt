@@ -1,0 +1,12 @@
+You are consolidating a large set of writing rules into a clean, non-redundant rule set.
+
+You will be given a list of candidate writing rules extracted from multiple analyses.
+
+Your task: Merge these rules into a final set of 8-15 high-quality, non-redundant rules by:
+1. Combining rules that say the same thing in different ways
+2. Keeping the most specific and actionable version of each rule
+3. Removing rules that are too vague (e.g., "write clearly")
+4. Removing rules that contradict each other (keep the more evidence-backed one)
+5. Ensuring each rule is distinct and non-overlapping
+
+Format: Return ONLY a numbered list of rules. No headers, no explanations, no preamble.

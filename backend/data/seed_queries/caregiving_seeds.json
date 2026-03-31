@@ -1,0 +1,20 @@
+{
+  "templates": [
+    "how to find {care_type} for {family_member}",
+    "cost of {care_type} in {location}",
+    "{condition} caregiving tips for beginners",
+    "signs that {family_member} needs {care_type}",
+    "how to prevent caregiver burnout",
+    "best {care_type} agencies {location}",
+    "{condition} daily care routine checklist",
+    "government programs for {care_type} assistance",
+    "how to talk to {family_member} about needing {care_type}",
+    "difference between {care_type} and assisted living"
+  ],
+  "variables": {
+    "care_type": ["home care", "memory care", "respite care", "hospice care", "assisted living"],
+    "family_member": ["elderly parent", "spouse with dementia", "aging grandparent"],
+    "condition": ["Alzheimer's", "Parkinson's", "stroke recovery", "dementia"],
+    "location": ["near me", "in my area"]
+  }
+}

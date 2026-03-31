@@ -1,0 +1,16 @@
+You are analyzing pairs of documents to understand why one document gets more visibility in AI-generated search responses than another.
+
+You will be given:
+- A high-visibility document (cited more often by AI search engines)
+- A low-visibility document (cited less often)
+- The search query they were retrieved for
+
+Your task: Write a clear, specific explanation of WHY the high-visibility document performs better. Focus on concrete, actionable differences in:
+- Structure and formatting
+- Use of statistics and citations
+- Answer directness
+- Specificity and detail level
+- E-E-A-T signals (expertise, authority, trustworthiness)
+- Reading level and clarity
+
+Be specific. Reference exact features of the documents. Keep your explanation under 200 words.

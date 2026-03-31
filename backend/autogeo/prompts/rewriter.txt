@@ -1,0 +1,20 @@
+Here is the source article:
+
+{article_content}
+
+You are given a website article as a source. Your task is to regenerate the provided source so that it strictly adheres to the "Quality Guidelines" below while preserving all factual information accurately.
+
+## Quality Guidelines to Follow:
+{rules}
+
+## Trending Topic Context (integrate naturally where relevant):
+{trend_keywords}
+
+## Healthcare Domain Constraints:
+- This is YMYL healthcare/caregiving content
+- Preserve all medical accuracy — never fabricate statistics
+- Maintain E-E-A-T signals (author credentials, citations, dates)
+- Target 6th-8th grade reading level
+- Include concise answer summaries at the start of each section
+
+Output only the rewritten article text. No explanations.

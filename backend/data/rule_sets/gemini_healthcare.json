@@ -1,0 +1,17 @@
+{
+  "name": "Healthcare General v1 (Gemini)",
+  "engine_model": "gemini-2.5-flash-lite",
+  "topic_domain": "healthcare",
+  "filtered_rules": [
+    "Include specific statistics from authoritative healthcare sources (CDC, NIH, AARP, peer-reviewed journals) with inline citations.",
+    "Start each major section with a concise 1-2 sentence answer that directly addresses a potential user question.",
+    "Use question-style headings that match how users phrase queries to AI assistants (e.g., 'How much does home care cost?' not 'Cost Overview').",
+    "Provide concrete, actionable caregiving steps with specific details (timeframes, costs, contact information) rather than generic advice.",
+    "Include personal experience signals (first-person caregiving perspectives, 'in our experience at CareYaya') to satisfy E-E-A-T requirements.",
+    "Structure content for scannability: short paragraphs (3-4 sentences), key takeaways after each section, comparison tables where applicable.",
+    "Address the emotional dimension of caregiving alongside practical information - generative engines favor comprehensive, empathetic coverage.",
+    "Include an FAQ section with 5-8 common questions and concise answers - these map directly to conversational AI queries.",
+    "Reference current programs, laws, and resources by name (e.g., 'Medicare Part A home health benefit', 'FMLA caregiver provisions').",
+    "Write at a 6th-8th grade reading level while maintaining clinical accuracy - use plain language explanations for medical terms."
+  ]
+}

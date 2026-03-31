@@ -1,0 +1,16 @@
+You are performing final quality control on a set of GEO (Generative Engine Optimization) writing rules.
+
+You will be given a list of merged writing rules. Your task: Remove any rules that are:
+- Ambiguous (could be interpreted multiple ways)
+- Not specific to how AI search engines cite content
+- About general writing quality rather than AI visibility
+- Duplicate of another rule in the list
+- Impossible to verify or measure
+
+Keep rules that are:
+- Specific and actionable
+- Directly related to AI search engine citation patterns
+- Measurable in some way
+- Relevant to healthcare/caregiving content
+
+Format: Return ONLY the final list of rules, numbered. Keep original wording where good. No headers, no explanations.
