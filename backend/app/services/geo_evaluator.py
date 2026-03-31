@@ -121,8 +121,8 @@ async def evaluate_geo(
     """Run full GEO evaluation and return visibility scores for both versions."""
     query = test_query or _DEFAULT_QUERY
 
-    # Use cheapest model for competitor generation to minimize cost
-    cheap_model = llm_client.CHEAPEST_MODEL
+    # Use cheapest available model for competitor generation to minimize cost
+    cheap_model = llm_client.get_cheapest_model()
     competing_docs = await generate_synthetic_competitors(query, num_competing_docs, cheap_model)
 
     # Build corpora: target doc first, then competitors

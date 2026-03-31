@@ -5,27 +5,53 @@ import httpx
 from ..config import get_openai_key, get_google_key, get_anthropic_key
 
 PROVIDER_MAP: dict[str, str] = {
+    # OpenAI
     "gpt-4o-mini": "openai",
     "gpt-4o": "openai",
-    "gpt-4.1": "openai",
     "gpt-4.1-mini": "openai",
+    "gpt-4.1": "openai",
+    # Google Gemini
     "gemini-2.5-flash-lite": "google",
     "gemini-2.5-flash": "google",
     "gemini-2.5-pro": "google",
-    "claude-3-5-haiku-20241022": "anthropic",
-    "claude-3-5-sonnet-20241022": "anthropic",
+    # Anthropic Claude (current models only — 3.5 models deprecated/404)
     "claude-haiku-4-5-20251001": "anthropic",
     "claude-sonnet-4-6": "anthropic",
     "claude-opus-4-6": "anthropic",
+    # Legacy aliases — kept for backwards compat with existing rule sets in DB
+    "claude-3-5-haiku-20241022": "anthropic",
+    "claude-3-5-sonnet-20241022": "anthropic",
 }
 
-# Gemini model name mapping (model-id → actual API name)
+# Map deprecated Anthropic 3.5 model IDs to their current replacements
+ANTHROPIC_MODEL_ALIASES: dict[str, str] = {
+    "claude-3-5-haiku-20241022": "claude-haiku-4-5-20251001",
+    "claude-3-5-sonnet-20241022": "claude-sonnet-4-6",
+}
+
+# Gemini model name mapping (model-id → actual Generative Language API name)
 GEMINI_MODEL_MAP: dict[str, str] = {
     "gemini-2.5-flash-lite": "gemini-2.5-flash-lite-preview-06-17",
     "gemini-2.5-flash": "gemini-2.5-flash",
     "gemini-2.5-pro": "gemini-2.5-pro",
 }
 
+
+def get_cheapest_model() -> str:
+    """Return the cheapest available model based on which API keys are configured."""
+    gk = get_google_key()
+    ok = get_openai_key()
+    ak = get_anthropic_key()
+    if len(gk) > 10:
+        return "gemini-2.5-flash-lite"
+    if len(ok) > 10:
+        return "gpt-4o-mini"
+    if len(ak) > 10:
+        return "claude-haiku-4-5-20251001"
+    return "gemini-2.5-flash-lite"  # final fallback
+
+
+# Legacy constant — use get_cheapest_model() for runtime selection
 CHEAPEST_MODEL = "gemini-2.5-flash-lite"
 
 
@@ -92,8 +118,10 @@ async def _anthropic_chat(
     model: str, prompt: str, system: Optional[str], max_tokens: int
 ) -> str:
     api_key = get_anthropic_key()
+    # Resolve deprecated model aliases to current replacements
+    resolved_model = ANTHROPIC_MODEL_ALIASES.get(model, model)
     body: dict = {
-        "model": model,
+        "model": resolved_model,
         "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}],
     }
@@ -119,7 +147,7 @@ async def test_key(provider: str) -> bool:
     test_model = {
         "openai": "gpt-4o-mini",
         "google": "gemini-2.5-flash-lite",
-        "anthropic": "claude-3-5-haiku-20241022",
+        "anthropic": "claude-haiku-4-5-20251001",
     }.get(provider)
     if not test_model:
         return False

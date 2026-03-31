@@ -119,9 +119,7 @@ export const GE_MODELS = [
   { id: 'gpt-4.1', label: 'GPT-4.1', provider: 'openai', tier: 'standard' },
   { id: 'gpt-4o', label: 'GPT-4o', provider: 'openai', tier: 'standard' },
   { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', provider: 'anthropic', tier: 'fast' },
-  { id: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku', provider: 'anthropic', tier: 'fast' },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'anthropic', tier: 'standard' },
-  { id: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet', provider: 'anthropic', tier: 'standard' },
   { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', provider: 'anthropic', tier: 'standard' },
 ] as const;
 
