@@ -1,11 +1,20 @@
 """
-Google Trends service using trendspyg (MIT, active pytrends replacement).
-Caches all results in TrendCache table with 24-hour TTL.
-Healthcare category ID = 45.
-"""
+Google Trends service using trendspyg 0.4.0 RSS API.
 
-import json
+trendspyg 0.4.0 uses RSS-based trending topics (real-time, no rate limits).
+The RSS feed returns ~10-20 currently trending topics for a geo with traffic
+volumes. It does NOT support topic-specific queries or time series data.
+
+Flow:
+  1. Fetch current trending topics via RSS for the geo (cached 1 hour in SQLite)
+  2. Filter: topics whose words overlap with the user's topic go into rising_queries
+  3. All topics sorted by traffic go into top_queries
+  4. interest_over_time is always [] (TrendChart renders null for empty data)
+"""
+from __future__ import annotations
 import asyncio
+import json
+import re
 from datetime import datetime, timezone, timedelta
 
 from fastapi import HTTPException
@@ -13,135 +22,131 @@ from sqlalchemy.orm import Session
 
 from ..models import TrendCache
 
+_STOPWORDS = {"the", "a", "an", "for", "of", "in", "and", "or", "to", "with", "is", "are", "on"}
 
-def _fetch_sync(topic: str, timeframe: str, geo: str) -> dict:
-    """Synchronous trendspyg fetch — runs in a thread pool executor."""
+
+def _parse_traffic(traffic_str: str) -> int:
+    """Parse traffic strings like '200+', '2K+', '10K+' to integers for sorting."""
+    if not traffic_str:
+        return 0
+    clean = re.sub(r"[+,\s]", "", str(traffic_str)).upper()
     try:
-        from trendspyg import TrendReq
-    except ImportError as e:
-        raise RuntimeError(f"trendspyg is not installed: {e}")
+        if "M" in clean:
+            return int(float(clean.replace("M", "")) * 1_000_000)
+        if "K" in clean:
+            return int(float(clean.replace("K", "")) * 1_000)
+        return int(clean)
+    except (ValueError, TypeError):
+        return 0
+
+
+def _fetch_rss_sync(geo: str) -> list[dict]:
+    """Fetch RSS trending topics synchronously (runs in thread executor)."""
+    from trendspyg import download_google_trends_rss
+
+    # trendspyg RSS only accepts country codes; empty string = worldwide is not supported
+    rss_geo = geo if geo else "US"
 
     try:
-        trendspyg_obj = TrendReq(hl="en-US", tz=360)
-        trendspyg_obj.build_payload([topic], timeframe=timeframe, geo=geo, gprop="")
-
-        # --- Interest over time ---
-        iot_df = trendspyg_obj.interest_over_time()
-
-        interest_over_time = []
-        if iot_df is not None and not iot_df.empty:
-            # Drop isPartial column if present
-            if "isPartial" in iot_df.columns:
-                iot_df = iot_df.drop(columns=["isPartial"])
-            for date_idx, row in iot_df.iterrows():
-                date_str = date_idx.strftime("%Y-%m")
-                # Use first non-index column value (the topic column)
-                value = int(row.iloc[0]) if len(row) > 0 else 0
-                interest_over_time.append({"date": date_str, topic: value})
-
-        # --- Related queries ---
-        related = trendspyg_obj.related_queries()
-
-        rising_queries = []
-        top_queries = []
-
-        if related and topic in related:
-            topic_related = related[topic]
-
-            # Rising queries
-            rising_df = topic_related.get("rising") if topic_related else None
-            if rising_df is not None and not rising_df.empty:
-                for _, row in rising_df.iterrows():
-                    query_val = row.get("query", "")
-                    raw_value = row.get("value", 0)
-                    # value may be "Breakout" string or integer
-                    if isinstance(raw_value, str):
-                        value = raw_value
-                    else:
-                        try:
-                            value = int(raw_value)
-                        except (ValueError, TypeError):
-                            value = str(raw_value)
-                    rising_queries.append({"query": query_val, "value": value})
-
-            # Top queries
-            top_df = topic_related.get("top") if topic_related else None
-            if top_df is not None and not top_df.empty:
-                for _, row in top_df.iterrows():
-                    query_val = row.get("query", "")
-                    raw_value = row.get("value", 0)
-                    try:
-                        value = int(raw_value)
-                    except (ValueError, TypeError):
-                        value = str(raw_value)
-                    top_queries.append({"query": query_val, "value": value})
-
-        return {
-            "interest_over_time": interest_over_time,
-            "rising_queries": rising_queries,
-            "top_queries": top_queries,
-        }
-
+        raw = download_google_trends_rss(
+            geo=rss_geo,
+            output_format="dict",
+            include_images=False,
+            include_articles=False,
+            cache=False,
+        )
+        return raw or []
     except Exception as e:
-        raise RuntimeError(f"Google Trends request failed: {e}")
+        raise RuntimeError(f"RSS fetch failed for geo={rss_geo}: {e}")
+
+
+def _build_result(raw_trends: list[dict], topic: str) -> dict:
+    """Convert raw RSS trends into TrendResult shape."""
+    all_queries = []
+    for t in raw_trends:
+        trend_name = t.get("trend", "").strip()
+        if not trend_name:
+            continue
+        traffic_str = str(t.get("traffic", "0"))
+        all_queries.append({
+            "query": trend_name,
+            "value": traffic_str,          # keep original string e.g. "2K+"
+            "_sort_key": _parse_traffic(traffic_str),
+        })
+
+    # Sort descending by traffic
+    all_queries.sort(key=lambda x: x["_sort_key"], reverse=True)
+
+    # Strip internal sort key from output
+    top_queries = [{"query": q["query"], "value": q["value"]} for q in all_queries]
+
+    # Rising = topics that contain any non-stopword from the user's topic
+    topic_words = {w.lower() for w in topic.split()} - _STOPWORDS
+    if topic_words:
+        rising_queries = [
+            q for q in top_queries
+            if any(w in q["query"].lower() for w in topic_words)
+        ]
+    else:
+        rising_queries = []
+
+    # Fallback: if no topic match, show top 5 as rising
+    if not rising_queries:
+        rising_queries = top_queries[:5]
+
+    return {
+        "interest_over_time": [],  # RSS has no time series; TrendChart hides itself for []
+        "rising_queries": rising_queries,
+        "top_queries": top_queries,
+    }
 
 
 async def discover_trends(
     topic: str,
-    timeframe: str = "today 12-m",
+    timeframe: str = "rss",
     geo: str = "US",
-    db: Session = None,
+    db: Session | None = None,
 ) -> dict:
     """
-    Fetch Google Trends data for a topic with 24-hour SQLite caching.
+    Fetch currently trending topics via trendspyg RSS with 1-hour SQLite cache.
 
-    Returns a dict with keys:
-      - interest_over_time: list of {"date": "YYYY-MM", <topic>: int}
-      - rising_queries: list of {"query": str, "value": int | str}
-      - top_queries: list of {"query": str, "value": int}
+    The timeframe parameter is accepted for interface compatibility but ignored —
+    RSS always returns real-time data.
     """
-    cache_key = f"{topic}|{timeframe}|{geo}"
+    cache_key = f"rss|{geo or 'US'}"
 
-    # --- Cache check ---
+    # --- Cache check (1 h TTL) ---
     if db is not None:
         existing = db.query(TrendCache).filter(TrendCache.query == cache_key).first()
         if existing:
-            age = datetime.now(timezone.utc) - existing.cached_at.replace(
-                tzinfo=timezone.utc
-            )
+            age = datetime.now(timezone.utc) - existing.cached_at.replace(tzinfo=timezone.utc)
             if age < timedelta(hours=existing.ttl_hours):
-                return json.loads(existing.result_json)
+                raw_trends = json.loads(existing.result_json)
+                return _build_result(raw_trends, topic)
 
-    # --- Cache miss: fetch from Google Trends ---
+    # --- Fetch fresh ---
     try:
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, _fetch_sync, topic, timeframe, geo)
+        raw_trends = await loop.run_in_executor(None, _fetch_rss_sync, geo)
     except RuntimeError as e:
-        raise HTTPException(status_code=429, detail=str(e))
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
-        raise HTTPException(
-            status_code=400, detail=f"Trends fetch failed: {str(e)}"
-        )
+        raise HTTPException(status_code=400, detail=f"Trends fetch failed: {e}")
 
-    if not result:
-        raise HTTPException(
-            status_code=404, detail="No trends data returned for the given topic."
-        )
+    if not raw_trends:
+        raise HTTPException(status_code=404, detail="No trending topics returned for this region.")
 
-    # --- Store in cache ---
+    # --- Cache raw trends ---
     if db is not None:
-        # Delete stale entries for the same key before inserting
         db.query(TrendCache).filter(TrendCache.query == cache_key).delete()
-
-        cache_entry = TrendCache(
+        db.add(TrendCache(
             query=cache_key,
-            timeframe=timeframe,
-            geo=geo,
-            result_json=json.dumps(result),
+            timeframe="rss",
+            geo=geo or "US",
+            result_json=json.dumps(raw_trends),
             cached_at=datetime.now(timezone.utc),
-            ttl_hours=24,
-        )
-        db.add(cache_entry)
+            ttl_hours=1,
+        ))
         db.commit()
 
-    return result
+    return _build_result(raw_trends, topic)

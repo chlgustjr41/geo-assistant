@@ -98,6 +98,32 @@ def export_rule_set(rule_set_id: str, db: Session = Depends(get_db)):
     )
 
 
+class CreateRuleSetRequest(BaseModel):
+    name: str
+    engine_model: str
+    topic_domain: str = "custom"
+    rules: list[str] = []
+
+
+@router.post("")
+def create_rule_set(body: CreateRuleSetRequest, db: Session = Depends(get_db)):
+    if not body.name.strip():
+        raise HTTPException(400, "Name is required")
+    new_rs = RuleSet(
+        id=str(uuid_module.uuid4()),
+        name=body.name.strip(),
+        engine_model=body.engine_model,
+        topic_domain=body.topic_domain,
+        rules_json=json.dumps({"filtered_rules": body.rules}),
+        num_rules=len(body.rules),
+        is_builtin=False,
+    )
+    db.add(new_rs)
+    db.commit()
+    db.refresh(new_rs)
+    return {"id": new_rs.id, "name": new_rs.name}
+
+
 # ── New Phase 5 endpoints ───────────────────────────────────────────────────
 
 class GenerateQueriesRequest(BaseModel):

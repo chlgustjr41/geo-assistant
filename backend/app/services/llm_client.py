@@ -7,16 +7,23 @@ from ..config import get_openai_key, get_google_key, get_anthropic_key
 PROVIDER_MAP: dict[str, str] = {
     "gpt-4o-mini": "openai",
     "gpt-4o": "openai",
+    "gpt-4.1": "openai",
+    "gpt-4.1-mini": "openai",
     "gemini-2.5-flash-lite": "google",
     "gemini-2.5-flash": "google",
+    "gemini-2.5-pro": "google",
     "claude-3-5-haiku-20241022": "anthropic",
     "claude-3-5-sonnet-20241022": "anthropic",
+    "claude-haiku-4-5-20251001": "anthropic",
+    "claude-sonnet-4-6": "anthropic",
+    "claude-opus-4-6": "anthropic",
 }
 
 # Gemini model name mapping (model-id → actual API name)
 GEMINI_MODEL_MAP: dict[str, str] = {
     "gemini-2.5-flash-lite": "gemini-2.5-flash-lite-preview-06-17",
     "gemini-2.5-flash": "gemini-2.5-flash",
+    "gemini-2.5-pro": "gemini-2.5-pro",
 }
 
 CHEAPEST_MODEL = "gemini-2.5-flash-lite"

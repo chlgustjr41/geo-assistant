@@ -60,6 +60,8 @@ export const trendsApi = {
 
 export const rulesApi = {
   list: () => api.get<RuleSet[]>('/api/rules').then((r) => r.data),
+  create: (data: { name: string; engine_model: string; topic_domain?: string; rules?: string[] }) =>
+    api.post<{ id: string; name: string }>('/api/rules', data).then((r) => r.data),
   get: (id: string) => api.get<RuleSetDetail>(`/api/rules/${id}`).then((r) => r.data),
   update: (id: string, data: { name?: string; rules?: { filtered_rules: string[] } }) =>
     api.put<{ ok: boolean }>(`/api/rules/${id}`, data).then((r) => r.data),
