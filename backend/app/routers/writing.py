@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Article, RuleSet
 from ..services.article_scraper import scrape_url
-from ..services import geo_rewriter
+from ..services import geo_rewriter, geo_evaluator
 
 router = APIRouter(prefix="/api/writing", tags=["writing"])
 
@@ -100,4 +100,53 @@ async def rewrite_article(body: RewriteRequest, db: Session = Depends(get_db)):
         "model_used": body.model,
         "rules_applied": filtered_rules,
         "trend_keywords_injected": body.trend_keywords,
+    }
+
+
+class EvaluateGeoRequest(BaseModel):
+    original_content: str
+    rewritten_content: str
+    test_query: str | None = None
+    engine_model: str
+    num_competing_docs: int = 4
+
+
+@router.post("/evaluate-geo")
+async def evaluate_geo(body: EvaluateGeoRequest):
+    try:
+        result = await geo_evaluator.evaluate_geo(
+            original_content=body.original_content,
+            rewritten_content=body.rewritten_content,
+            engine_model=body.engine_model,
+            test_query=body.test_query,
+            num_competing_docs=body.num_competing_docs,
+        )
+    except Exception as e:
+        raise HTTPException(400, f"GEO evaluation failed: {str(e)}")
+
+    return {
+        "original_scores": {
+            "word": result.original_scores.word,
+            "pos": result.original_scores.pos,
+            "overall": result.original_scores.overall,
+        },
+        "optimized_scores": {
+            "word": result.optimized_scores.word,
+            "pos": result.optimized_scores.pos,
+            "overall": result.optimized_scores.overall,
+        },
+        "improvement": result.improvement,
+        "ge_response_original": result.ge_response_original,
+        "ge_response_optimized": result.ge_response_optimized,
+        "source_citations": [
+            {
+                "source_id": c.source_id,
+                "label": c.label,
+                "word_score": c.word_score,
+                "cited": c.cited,
+            }
+            for c in result.source_citations
+        ],
+        "test_query_used": result.test_query_used,
+        "evaluation_cost_usd": result.evaluation_cost_usd,
     }
