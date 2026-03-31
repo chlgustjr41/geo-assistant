@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 from ..config import (
     get_openai_key,
     get_google_key,
@@ -8,27 +8,42 @@ from ..config import (
     get_default_model,
     get_default_rule_set,
     update_env,
+    _key_is_configured,
 )
 from ..services.llm_client import test_key as _test_key
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
+# Minimum realistic length for any API key
+_MIN_KEY_LEN = 20
+
+# Known key prefixes for basic format validation
+_KEY_PREFIXES: dict[str, tuple[str, ...]] = {
+    "openai": ("sk-",),
+    "google": ("AI",),
+    "anthropic": ("sk-ant-",),
+}
+
 
 def _mask(key: str) -> str:
-    if not key or len(key) < 8:
+    """Mask a key for safe display: show first 4 and last 2 characters."""
+    if not _key_is_configured(key):
         return ""
-    return key[:4] + "*" * (len(key) - 6) + key[-2:]
+    return key[:4] + "*" * max(len(key) - 6, 4) + key[-2:]
 
 
 @router.get("")
 async def get_settings():
+    ok = get_openai_key()
+    gk = get_google_key()
+    ak = get_anthropic_key()
     return {
-        "openai_key_set": bool(get_openai_key()),
-        "openai_key_masked": _mask(get_openai_key()),
-        "google_key_set": bool(get_google_key()),
-        "google_key_masked": _mask(get_google_key()),
-        "anthropic_key_set": bool(get_anthropic_key()),
-        "anthropic_key_masked": _mask(get_anthropic_key()),
+        "openai_key_set": _key_is_configured(ok),
+        "openai_key_masked": _mask(ok),
+        "google_key_set": _key_is_configured(gk),
+        "google_key_masked": _mask(gk),
+        "anthropic_key_set": _key_is_configured(ak),
+        "anthropic_key_masked": _mask(ak),
         "target_website": get_target_website(),
         "default_model": get_default_model(),
         "default_rule_set": get_default_rule_set(),
@@ -36,20 +51,36 @@ async def get_settings():
 
 
 class ApiKeyUpdate(BaseModel):
-    provider: str  # "openai" | "google" | "anthropic"
-    key: str
+    provider: str
+    # SecretStr prevents the key value from appearing in repr(), logs, or error tracebacks
+    key: SecretStr
 
 
 @router.post("/api-keys")
 async def update_api_key(body: ApiKeyUpdate):
-    key_map = {
+    _ENV_KEY_MAP = {
         "openai": "OPENAI_API_KEY",
         "google": "GOOGLE_API_KEY",
         "anthropic": "ANTHROPIC_API_KEY",
     }
-    if body.provider not in key_map:
-        raise HTTPException(400, "Invalid provider. Must be openai, google, or anthropic.")
-    update_env(key_map[body.provider], body.key)
+    if body.provider not in _ENV_KEY_MAP:
+        raise HTTPException(400, "Invalid provider. Must be: openai, google, or anthropic.")
+
+    raw_key = body.key.get_secret_value().strip()
+
+    # Basic security checks — reject obviously invalid values before writing to disk
+    if len(raw_key) < _MIN_KEY_LEN:
+        raise HTTPException(400, f"Key is too short (minimum {_MIN_KEY_LEN} characters).")
+
+    expected_prefixes = _KEY_PREFIXES.get(body.provider, ())
+    if expected_prefixes and not any(raw_key.startswith(p) for p in expected_prefixes):
+        raise HTTPException(
+            400,
+            f"Key does not match expected format for {body.provider}. "
+            f"Expected prefix: {' or '.join(expected_prefixes)}",
+        )
+
+    update_env(_ENV_KEY_MAP[body.provider], raw_key)
     return {"ok": True}
 
 

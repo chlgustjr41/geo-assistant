@@ -1,4 +1,5 @@
 import os
+import stat
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -6,6 +7,22 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 ENV_FILE = BASE_DIR / ".env"
 
 load_dotenv(ENV_FILE)
+
+# Known placeholder values that should be treated as "not configured"
+_PLACEHOLDERS = {"", "sk-...", "AI...", "sk-ant-..."}
+
+
+def _key_is_configured(value: str) -> bool:
+    """Return True only when a real key value has been set."""
+    return bool(value) and value not in _PLACEHOLDERS and len(value) >= 20
+
+
+def _set_env_file_permissions() -> None:
+    """Restrict .env to owner-only read/write (600). No-op on Windows."""
+    try:
+        ENV_FILE.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    except (OSError, NotImplementedError):
+        pass
 
 
 def get_openai_key() -> str:
@@ -54,4 +71,5 @@ def update_env(key: str, value: str) -> None:
     with open(ENV_FILE, "w") as f:
         f.writelines(new_lines)
 
+    _set_env_file_permissions()
     os.environ[key] = value

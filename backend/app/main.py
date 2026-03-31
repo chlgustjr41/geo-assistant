@@ -25,6 +25,8 @@ app.include_router(settings_router.router)
 
 @app.on_event("startup")
 async def on_startup() -> None:
+    from .config import _set_env_file_permissions
+    _set_env_file_permissions()
     seed_rule_sets()
 
 
