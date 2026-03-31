@@ -21,7 +21,7 @@ interface Props {
 export function MiniTrainingConfig({ ruleSets, onExport, exporting }: Props) {
   const [config, setConfig] = useState<Config>({
     baseModel: 'Qwen/Qwen3-1.7B',
-    teacherModel: 'gemini-2.5-flash',
+    teacherModel: 'claude-sonnet-4-6',
     ruleSetId: '',
     lr: '2e-5',
     epochs: '3',

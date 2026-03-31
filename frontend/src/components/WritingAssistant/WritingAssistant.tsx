@@ -25,7 +25,7 @@ export function WritingAssistant({ injectedKeywords, onClearKeywords }: Props) {
     loadRuleSets, loadHistory, saveToHistory,
   } = useWritingAssistant();
 
-  const [selectedModel, setSelectedModel] = useState<GEModelId>('gemini-2.5-flash-lite');
+  const [selectedModel, setSelectedModel] = useState<GEModelId>('claude-sonnet-4-6');
   const [selectedRuleSetId, setSelectedRuleSetId] = useState('');
   const [keywords, setKeywords] = useState<string[]>([]);
 

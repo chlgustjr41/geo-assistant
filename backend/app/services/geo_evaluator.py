@@ -21,6 +21,7 @@ import asyncio
 from dataclasses import dataclass, field
 
 from . import llm_client
+from .llm_client import PIPELINE_BASE_MODEL
 from .document_retriever import generate_synthetic_competitors, bm25_retrieve
 
 _DEFAULT_NUM_COMPETING = 4
@@ -121,9 +122,8 @@ async def evaluate_geo(
     """Run full GEO evaluation and return visibility scores for both versions."""
     query = test_query or _DEFAULT_QUERY
 
-    # Use cheapest available model for competitor generation to minimize cost
-    cheap_model = llm_client.get_cheapest_model()
-    competing_docs = await generate_synthetic_competitors(query, num_competing_docs, cheap_model)
+    # Use pipeline base model (Claude Sonnet) for competitor generation
+    competing_docs = await generate_synthetic_competitors(query, num_competing_docs, PIPELINE_BASE_MODEL)
 
     # Build corpora: target doc first, then competitors
     corpus_orig = [original_content] + competing_docs

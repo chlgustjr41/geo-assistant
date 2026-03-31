@@ -12,6 +12,7 @@ import random
 from pathlib import Path
 from typing import AsyncGenerator, Callable
 from . import llm_client
+from .llm_client import PIPELINE_BASE_MODEL
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "autogeo" / "prompts"
 
@@ -35,14 +36,14 @@ DOC_QUALITY_PROMPTS = [
 ]
 
 
-async def _generate_doc(query: str, quality_prompt: str, model: str) -> str:
+async def _generate_doc(query: str, quality_prompt: str) -> str:
     prompt = quality_prompt.format(query=query)
-    return await llm_client.chat(model, prompt, max_tokens=1024)
+    return await llm_client.chat(PIPELINE_BASE_MODEL, prompt, max_tokens=1024)
 
 
-async def _generate_docs_for_query(query: str, model: str) -> list[str]:
+async def _generate_docs_for_query(query: str) -> list[str]:
     """Generate 5 synthetic documents of varying quality for a query."""
-    tasks = [_generate_doc(query, p, model) for p in DOC_QUALITY_PROMPTS]
+    tasks = [_generate_doc(query, p) for p in DOC_QUALITY_PROMPTS]
     return await asyncio.gather(*tasks)
 
 
@@ -91,7 +92,6 @@ def _select_contrast_pair(docs: list[str], ge_response: str) -> tuple[str, str]:
 
 async def _stage_explainer(
     pairs: list[tuple[str, str, str]],  # (query, high_doc, low_doc)
-    model: str,
     progress_cb: Callable[[str, int, int], None],
 ) -> list[str]:
     """Stage 1: For each pair, explain why high_doc outperforms low_doc."""
@@ -108,14 +108,13 @@ HIGH-VISIBILITY DOCUMENT:
 
 LOW-VISIBILITY DOCUMENT:
 {low_doc[:2000]}"""
-        explanation = await llm_client.chat(model, prompt, max_tokens=512)
+        explanation = await llm_client.chat(PIPELINE_BASE_MODEL, prompt, max_tokens=512)
         explanations.append(explanation)
     return explanations
 
 
 async def _stage_extractor(
     explanations: list[str],
-    model: str,
     progress_cb: Callable[[str, int, int], None],
 ) -> list[str]:
     """Stage 2: Distill each explanation into 3-5 concise rules."""
@@ -127,8 +126,7 @@ async def _stage_extractor(
 
 OBSERVATIONS:
 {explanation}"""
-        raw_rules = await llm_client.chat(model, prompt, max_tokens=512)
-        # Parse numbered list
+        raw_rules = await llm_client.chat(PIPELINE_BASE_MODEL, prompt, max_tokens=512)
         for line in raw_rules.split("\n"):
             line = line.strip().lstrip("0123456789.). ").strip()
             if line and len(line) > 10:
@@ -138,14 +136,12 @@ OBSERVATIONS:
 
 async def _stage_merger(
     rules: list[str],
-    model: str,
     progress_cb: Callable[[str, int, int], None],
     chunk_size: int = 50,
 ) -> list[str]:
     """Stage 3: Hierarchically merge rules into non-redundant set."""
     merger_prompt = _load_prompt("merger")
 
-    # Process in chunks of chunk_size
     chunks = [rules[i:i+chunk_size] for i in range(0, len(rules), chunk_size)]
     merged_chunks = []
 
@@ -156,13 +152,12 @@ async def _stage_merger(
 
 CANDIDATE RULES:
 {numbered}"""
-        merged = await llm_client.chat(model, prompt, max_tokens=1024)
+        merged = await llm_client.chat(PIPELINE_BASE_MODEL, prompt, max_tokens=1024)
         for line in merged.split("\n"):
             line = line.strip().lstrip("0123456789.). ").strip()
             if line and len(line) > 10:
                 merged_chunks.append(line)
 
-    # If multiple chunks, merge again
     if len(chunks) > 1:
         progress_cb("merger", len(chunks), len(chunks))
         numbered = "\n".join(f"{j+1}. {r}" for j, r in enumerate(merged_chunks))
@@ -170,7 +165,7 @@ CANDIDATE RULES:
 
 CANDIDATE RULES:
 {numbered}"""
-        final = await llm_client.chat(model, prompt, max_tokens=1024)
+        final = await llm_client.chat(PIPELINE_BASE_MODEL, prompt, max_tokens=1024)
         result = []
         for line in final.split("\n"):
             line = line.strip().lstrip("0123456789.). ").strip()
@@ -183,7 +178,6 @@ CANDIDATE RULES:
 
 async def _stage_filter(
     rules: list[str],
-    model: str,
     progress_cb: Callable[[str, int, int], None],
 ) -> list[str]:
     """Stage 4: Remove ambiguous or non-actionable rules."""
@@ -194,7 +188,7 @@ async def _stage_filter(
 
 RULES TO FILTER:
 {numbered}"""
-    filtered = await llm_client.chat(model, prompt, max_tokens=1024)
+    filtered = await llm_client.chat(PIPELINE_BASE_MODEL, prompt, max_tokens=1024)
     result = []
     for line in filtered.split("\n"):
         line = line.strip().lstrip("0123456789.). ").strip()
@@ -214,40 +208,34 @@ async def extract_rules_stream(
     """
     Run the full 4-stage AutoGEO rule extraction pipeline.
 
+    engine_model: the GE model to simulate (what you're optimising for — e.g. GPT-4o, Gemini).
+                  Only used in _simulate_ge(); all pipeline stages use PIPELINE_BASE_MODEL.
+
     Calls progress_callback with dicts like:
       {"stage": "generating_docs", "completed": 3, "total": 20}
-      {"stage": "explainer", "completed": 5, "total": 20}
-      {"stage": "extractor", "completed": 10, "total": 20}
-      {"stage": "merger", "completed": 1, "total": 2}
-      {"stage": "filter", "completed": 1, "total": 1}
+      {"stage": "explainer",       "completed": 5, "total": 20}
+      {"stage": "extractor",       "completed": 10, "total": 20}
+      {"stage": "merger",          "completed": 1,  "total": 2}
+      {"stage": "filter",          "completed": 1,  "total": 1}
 
     Returns the final filtered_rules list.
     """
-    # Phase A: Generate synthetic documents + GE responses for each query
-    pairs: list[tuple[str, str, str]] = []
+    def _cb(stage: str, completed: int, total: int) -> None:
+        progress_callback({"stage": stage, "completed": completed, "total": total})
 
+    # Phase A: Generate synthetic docs (Claude) + GE simulation (target engine_model)
+    pairs: list[tuple[str, str, str]] = []
     for i, query in enumerate(queries):
         progress_callback({"stage": "generating_docs", "completed": i + 1, "total": len(queries)})
-        docs = await _generate_docs_for_query(query, engine_model)
-        ge_response = await _simulate_ge(query, docs, engine_model)
+        docs = await _generate_docs_for_query(query)          # uses PIPELINE_BASE_MODEL
+        ge_response = await _simulate_ge(query, docs, engine_model)  # uses target engine
         high_doc, low_doc = _select_contrast_pair(docs, ge_response)
         pairs.append((query, high_doc, low_doc))
 
-    def make_cb(stage: str):
-        def cb(s: str, c: int, t: int):
-            progress_callback({"stage": s, "completed": c, "total": t})
-        return cb
-
-    # Stage 1: Explainer
-    explanations = await _stage_explainer(pairs, engine_model, make_cb("explainer"))
-
-    # Stage 2: Extractor
-    raw_rules = await _stage_extractor(explanations, engine_model, make_cb("extractor"))
-
-    # Stage 3: Merger
-    merged_rules = await _stage_merger(raw_rules, engine_model, make_cb("merger"))
-
-    # Stage 4: Filter
-    filtered_rules = await _stage_filter(merged_rules, engine_model, make_cb("filter"))
+    # All four pipeline stages use PIPELINE_BASE_MODEL (Claude Sonnet)
+    explanations = await _stage_explainer(pairs, _cb)
+    raw_rules = await _stage_extractor(explanations, _cb)
+    merged_rules = await _stage_merger(raw_rules, _cb)
+    filtered_rules = await _stage_filter(merged_rules, _cb)
 
     return filtered_rules

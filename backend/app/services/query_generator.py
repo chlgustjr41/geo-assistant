@@ -5,10 +5,11 @@ Used to seed the rule extraction pipeline.
 from __future__ import annotations
 import json
 from . import llm_client
+from .llm_client import PIPELINE_BASE_MODEL
 
 SYSTEM = "You are an expert at generating realistic search queries that people use when looking for healthcare and caregiving information."
 
-async def generate_queries(topic: str, num_queries: int = 20, model: str = "gemini-2.5-flash-lite") -> list[str]:
+async def generate_queries(topic: str, num_queries: int = 20, model: str = PIPELINE_BASE_MODEL) -> list[str]:
     """
     Generate num_queries realistic search queries for the given topic.
     Returns a list of query strings.

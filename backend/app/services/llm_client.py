@@ -54,6 +54,11 @@ def get_cheapest_model() -> str:
 # Legacy constant — use get_cheapest_model() for runtime selection
 CHEAPEST_MODEL = "gemini-2.5-flash-lite"
 
+# Base model used for all internal LLM-engineering pipeline work:
+# rule extraction stages, query generation, synthetic doc generation.
+# Using Claude Sonnet for high-quality reasoning throughout the pipeline.
+PIPELINE_BASE_MODEL = "claude-sonnet-4-6"
+
 
 def get_provider(model: str) -> str:
     return PROVIDER_MAP.get(model, "openai")

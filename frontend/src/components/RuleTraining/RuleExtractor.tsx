@@ -26,15 +26,16 @@ export function RuleExtractor() {
   const [extracting, setExtracting] = useState(false);
   const [progress, setProgress] = useState<ProgressState | null>(null);
   const [ruleSetName, setRuleSetName] = useState('');
-  const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash-lite');
+  const [selectedModel, setSelectedModel] = useState('claude-sonnet-4-6');
   const [step, setStep] = useState<'input' | 'queries' | 'extracting' | 'done'>('input');
   const [extractedRuleSetId, setExtractedRuleSetId] = useState<string | null>(null);
   const [extractedNumRules, setExtractedNumRules] = useState(0);
   const newQueryRef = useRef<HTMLInputElement>(null);
 
+  // Pipeline uses Claude Sonnet 4.6 (~$0.15/query); GE simulation adds ~$0.02/query
   const COST_ESTIMATE = queries.length > 0
-    ? `~$${(queries.length * 0.025).toFixed(2)}–$${(queries.length * 0.05).toFixed(2)}`
-    : '~$0.30–$0.80';
+    ? `~$${(queries.length * 0.15).toFixed(2)}–$${(queries.length * 0.20).toFixed(2)}`
+    : '~$1.50–$4.00';
 
   const handleGenerateQueries = async () => {
     if (!topic.trim()) { toast('error', 'Enter a topic first'); return; }
@@ -126,7 +127,11 @@ export function RuleExtractor() {
     <div className="space-y-4">
       {/* Step 1: Topic Input */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">Step 1: Define Topic</h3>
+        <h3 className="text-sm font-semibold text-gray-700 mb-2">Step 1: Define Topic &amp; Target GE</h3>
+        <p className="text-xs text-gray-500 mb-3">
+          Pipeline runs on <span className="font-medium text-purple-700">Claude Sonnet 4.6</span>.
+          Select which AI search engine to optimise your content for.
+        </p>
         <div className="flex gap-2">
           <input
             value={topic}
@@ -139,10 +144,24 @@ export function RuleExtractor() {
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            title="Target GE model — which AI search engine are you optimising for?"
           >
-            <option value="gemini-2.5-flash-lite">Gemini Flash Lite (fast)</option>
-            <option value="gemini-2.5-flash">Gemini Flash (better)</option>
-            <option value="gpt-4o-mini">GPT-4o Mini</option>
+            <optgroup label="Anthropic">
+              <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+              <option value="claude-opus-4-6">Claude Opus 4.6</option>
+              <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+            </optgroup>
+            <optgroup label="OpenAI">
+              <option value="gpt-4.1">GPT-4.1</option>
+              <option value="gpt-4o">GPT-4o</option>
+              <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
+              <option value="gpt-4o-mini">GPT-4o Mini</option>
+            </optgroup>
+            <optgroup label="Google">
+              <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+              <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+              <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+            </optgroup>
           </select>
           <button
             onClick={handleGenerateQueries}
