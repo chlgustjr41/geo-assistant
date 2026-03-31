@@ -131,7 +131,7 @@ export function RuleExtractor() {
           <input
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
-            placeholder='e.g. "caregiving tips for families with Alzheimer\'s patients"'
+            placeholder="e.g. &quot;caregiving tips for families with Alzheimer's patients&quot;"
             className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             onKeyDown={(e) => e.key === 'Enter' && handleGenerateQueries()}
           />
