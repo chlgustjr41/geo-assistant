@@ -7,7 +7,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 from ..deps import get_user_db as get_db, get_user_email
-from ..models import CorpusDocument, QuerySet
+from ..models import CorpusDocument, QuerySet, ActiveJob
+from ..database import get_user_session_factory
 from .. import job_manager
 
 logger = logging.getLogger(__name__)
@@ -196,6 +197,20 @@ async def bulk_add_urls(body: BulkAddUrlsRequest, db: Session = Depends(get_db),
 
     job = job_manager.create_job("corpus_import", user_email or "")
 
+    # Persist active-job flag (survives sign-out + refresh)
+    active_flag = ActiveJob(
+        job_type="corpus_import",
+        job_id=job.id,
+        config_json=json.dumps({
+            "query_set_id": body.query_set_id,
+            "corpus_set_id": body.corpus_set_id,
+            "url_count": len(body.urls),
+        }),
+    )
+    db.add(active_flag)
+    db.commit()
+    active_flag_id = active_flag.id
+
     async def event_generator():
         queue: asyncio.Queue = asyncio.Queue()
         total = len(body.urls)
@@ -227,6 +242,17 @@ async def bulk_add_urls(body: BulkAddUrlsRequest, db: Session = Depends(get_db),
                     item = await asyncio.wait_for(queue.get(), timeout=300)
                 except asyncio.TimeoutError:
                     job_manager.fail_job(job.id, "Timeout")
+                    # Update persistent flag
+                    try:
+                        _tdb = get_user_session_factory(user_email)()
+                        flag = _tdb.query(ActiveJob).filter(ActiveJob.id == active_flag_id).first()
+                        if flag:
+                            flag.status = "error"
+                            flag.error = "Timeout"
+                            _tdb.commit()
+                        _tdb.close()
+                    except Exception:
+                        pass
                     yield {"data": json.dumps({"status": "error", "message": "Timeout"})}
                     return
 
@@ -263,6 +289,17 @@ async def bulk_add_urls(body: BulkAddUrlsRequest, db: Session = Depends(get_db),
 
         result = {"added": added, "failed": failed}
         job_manager.complete_job(job.id, result)
+        # Update persistent flag to complete
+        try:
+            _cdb = get_user_session_factory(user_email)()
+            flag = _cdb.query(ActiveJob).filter(ActiveJob.id == active_flag_id).first()
+            if flag:
+                flag.status = "complete"
+                flag.result_json = json.dumps(result)
+                _cdb.commit()
+            _cdb.close()
+        except Exception:
+            pass
         yield {"data": json.dumps({"status": "complete", "added": added, "failed": failed})}
 
     return EventSourceResponse(event_generator())

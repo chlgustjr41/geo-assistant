@@ -308,9 +308,9 @@ On first access, the database is created with all tables, schema migrations are 
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | UUID (PK) | Unique identifier |
-| `job_type` | String | `"extraction"`, `"rewrite"`, or `"geo_evaluation"` |
+| `job_type` | String | `"extraction"`, `"rewrite"`, `"geo_evaluation"`, or `"corpus_import"` |
 | `job_id` | String | In-memory `job_manager` ID |
-| `config_json` | Text (nullable) | Request parameters for display |
+| `config_json` | Text (nullable) | Request parameters for UI recovery (rule set IDs, batch settings, query set selection, etc.) |
 | `status` | String | `"running"`, `"complete"`, `"error"`, `"stale"` |
 | `result_json` | Text (nullable) | Serialized job result |
 | `error` | String (nullable) | Error message |
@@ -455,12 +455,14 @@ Recovery (sign-out/sign-in or refresh)
 
 ### Covered Operations
 
-| Operation | Job Type | Progress Tracking |
-|-----------|----------|-------------------|
-| Rule extraction | `extraction` | Stage (bm25, explainer, extractor, merger, filter) + completed/total |
-| Article rewrite | `rewrite` | Stage (starting, merging_rules, rewriting) |
-| GEO evaluation | `geo_evaluation` | Stage (starting, evaluating) + completed/total queries |
-| Corpus import | `corpus_import` | Completed/total URLs |
+| Operation | Job Type | Progress Tracking | Persistent Config |
+|-----------|----------|-------------------|-------------------|
+| Rule extraction | `extraction` | Stage (bm25, explainer, extractor, merger, filter) + completed/total | `rule_set_name`, `engine_models`, `query_set_id`, `corpus_set_ids`, `query_count`, `corpus_doc_count` |
+| Article rewrite | `rewrite` | Stage (starting, merging_rules, rewriting) | `model`, `rule_set_ids` |
+| GEO evaluation | `geo_evaluation` | Stage (starting, evaluating) + completed/total queries | `batch_mode`, `query_count`, `batch_query_count`, `test_query`, `rule_set_ids` |
+| Corpus import | `corpus_import` | Completed/total URLs, added/failed counts | `query_set_id`, `corpus_set_id`, `url_count` |
+
+All four job types create a persistent `ActiveJob` row in the user's SQLite database when the job starts. On recovery, the frontend checks `GET /api/jobs/active/list` which cross-references persistent flags with the in-memory `job_manager`. Config stored in `config_json` is used to restore UI settings (selected rule sets, batch mode, query set selection, etc.).
 
 ---
 

@@ -37,6 +37,7 @@ export function WritingAssistant() {
     ruleSets, history,
     scraping, rewriting, evaluating,
     rewriteProgress, evalProgress,
+    recoveredEvalConfig,
     scrapeUrl, rewrite, evaluateGeo,
     loadRuleSets, loadHistory, deleteFromHistory,
     reset,
@@ -46,6 +47,13 @@ export function WritingAssistant() {
   const [selectedRuleSetIds, setSelectedRuleSetIds] = useLocalStorage<string[]>('geo_selected_rule_sets', []);
 
   useEffect(() => { loadRuleSets(); loadHistory(); }, []);
+
+  // Restore eval batch settings from recovered active-job config (sign-out/sign-in recovery)
+  useEffect(() => {
+    if (!recoveredEvalConfig) return;
+    if (recoveredEvalConfig.batch_mode !== undefined) setEvalBatchMode(!!recoveredEvalConfig.batch_mode);
+    if (typeof recoveredEvalConfig.batch_query_count === 'number') setEvalBatchCount(recoveredEvalConfig.batch_query_count);
+  }, [recoveredEvalConfig]);
 
   useEffect(() => {
     if (ruleSets.length === 0) return;

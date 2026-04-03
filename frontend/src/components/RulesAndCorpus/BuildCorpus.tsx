@@ -101,73 +101,131 @@ export function BuildCorpus({ onCorpusChanged }: Props) {
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Ref to track active-job flag ID for cleanup after polling completes
+  const activeJobFlagRef = useRef<string | null>(null);
+
+  // Start polling a running corpus import job by job_id
+  const startPolling = (jobId: string) => {
+    sessionStorage.setItem('geo_corpus_import_job_id', jobId);
+    setImporting(true);
+    if (pollingRef.current) clearInterval(pollingRef.current);
+    pollingRef.current = setInterval(async () => {
+      try {
+        const j = await jobsApi.get(jobId);
+        if (j.status === 'running') {
+          const pr = j.progress as Record<string, number> | undefined;
+          if (pr && 'completed' in pr) {
+            setImportProgress({ completed: pr.completed, total: pr.total, added: pr.added ?? 0, failedCount: pr.failed_count ?? 0 });
+          }
+        } else if (j.status === 'complete') {
+          if (pollingRef.current) clearInterval(pollingRef.current);
+          pollingRef.current = null;
+          sessionStorage.removeItem('geo_corpus_import_job_id');
+          setImporting(false);
+          setImportProgress(null);
+          const result = j.result as { added?: number; failed?: Array<{ url: string; error: string }> } | null;
+          if (result?.added) toast('success', `Added ${result.added} docs to corpus`);
+          if (result?.failed?.length) setImportFailures(result.failed);
+          setDiscovered(null);
+          setPickedUrls(new Set());
+          await loadDocs();
+          reloadCorpusSets();
+          onCorpusChanged?.();
+          // Clean up persistent flag
+          if (activeJobFlagRef.current) {
+            jobsApi.deleteActive(activeJobFlagRef.current).catch(() => {});
+            activeJobFlagRef.current = null;
+          }
+        } else {
+          if (pollingRef.current) clearInterval(pollingRef.current);
+          pollingRef.current = null;
+          sessionStorage.removeItem('geo_corpus_import_job_id');
+          setImporting(false);
+          setImportProgress(null);
+          toast('error', j.error || 'Import failed');
+          if (activeJobFlagRef.current) {
+            jobsApi.deleteActive(activeJobFlagRef.current).catch(() => {});
+            activeJobFlagRef.current = null;
+          }
+        }
+      } catch {
+        if (pollingRef.current) clearInterval(pollingRef.current);
+        pollingRef.current = null;
+        sessionStorage.removeItem('geo_corpus_import_job_id');
+        setImporting(false);
+        setImportProgress(null);
+      }
+    }, 3000);
+  };
+
   // ── Recover running import job on mount ──
+  // Checks sessionStorage first (same-session refresh), then persistent DB flags (sign-out/sign-in)
   useEffect(() => {
     const savedJobId = sessionStorage.getItem('geo_corpus_import_job_id');
-    if (!savedJobId) return;
 
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const job = await jobsApi.get(savedJobId);
+    if (savedJobId) {
+      // Same-session refresh recovery
+      let cancelled = false;
+      jobsApi.get(savedJobId).then((job) => {
         if (cancelled) return;
         if (job.status === 'running') {
-          setImporting(true);
           const p = job.progress as Record<string, number> | undefined;
           if (p && 'completed' in p) {
             setImportProgress({ completed: p.completed, total: p.total, added: p.added ?? 0, failedCount: p.failed_count ?? 0 });
           }
-          pollingRef.current = setInterval(async () => {
-            try {
-              const j = await jobsApi.get(savedJobId);
-              if (j.status === 'running') {
-                const pr = j.progress as Record<string, number> | undefined;
-                if (pr && 'completed' in pr) {
-                  setImportProgress({ completed: pr.completed, total: pr.total, added: pr.added ?? 0, failedCount: pr.failed_count ?? 0 });
-                }
-              } else if (j.status === 'complete') {
-                if (pollingRef.current) clearInterval(pollingRef.current);
-                sessionStorage.removeItem('geo_corpus_import_job_id');
-                setImporting(false);
-                setImportProgress(null);
-                const result = j.result as { added?: number; failed?: Array<{ url: string; error: string }> } | null;
-                if (result?.added) toast('success', `Added ${result.added} docs to corpus`);
-                if (result?.failed?.length) setImportFailures(result.failed);
-                setDiscovered(null);
-                setPickedUrls(new Set());
-                await loadDocs();
-                reloadCorpusSets();
-                onCorpusChanged?.();
-              } else {
-                if (pollingRef.current) clearInterval(pollingRef.current);
-                sessionStorage.removeItem('geo_corpus_import_job_id');
-                setImporting(false);
-                setImportProgress(null);
-                toast('error', j.error || 'Import failed');
-              }
-            } catch {
-              if (pollingRef.current) clearInterval(pollingRef.current);
-              sessionStorage.removeItem('geo_corpus_import_job_id');
-              setImporting(false);
-              setImportProgress(null);
-            }
-          }, 3000);
+          startPolling(savedJobId);
         } else if (job.status === 'complete') {
           sessionStorage.removeItem('geo_corpus_import_job_id');
           const result = job.result as { added?: number; failed?: Array<{ url: string; error: string }> } | null;
           if (result?.added) toast('success', `Added ${result.added} docs to corpus`);
           if (result?.failed?.length) setImportFailures(result.failed);
-          await loadDocs();
+          loadDocs();
           reloadCorpusSets();
         } else {
           sessionStorage.removeItem('geo_corpus_import_job_id');
         }
-      } catch {
+      }).catch(() => {
         sessionStorage.removeItem('geo_corpus_import_job_id');
+      });
+      return () => { cancelled = true; if (pollingRef.current) clearInterval(pollingRef.current); };
+    }
+
+    // Cross-session recovery: check persistent DB flags
+    jobsApi.listActive().then(({ active_jobs }) => {
+      for (const aj of active_jobs) {
+        if (aj.job_type !== 'corpus_import') continue;
+        const cfg = aj.config as Record<string, unknown> | null;
+
+        // Restore query set selection from config
+        if (cfg?.query_set_id && typeof cfg.query_set_id === 'string') {
+          setSelectedQsId(cfg.query_set_id);
+        }
+
+        if (aj.status === 'running') {
+          activeJobFlagRef.current = aj.id;
+          startPolling(aj.job_id);
+          // Set progress from initial info
+          if (cfg?.url_count) {
+            setImportProgress({ completed: 0, total: cfg.url_count as number, added: 0, failedCount: 0 });
+          }
+        } else if (aj.status === 'complete' && aj.result) {
+          const result = aj.result as { added?: number; failed?: Array<{ url: string; error: string }> };
+          if (result.added) toast('success', `Corpus import completed while you were away (${result.added} docs added)`);
+          if (result.failed?.length) setImportFailures(result.failed);
+          loadDocs();
+          reloadCorpusSets();
+          onCorpusChanged?.();
+          jobsApi.deleteActive(aj.id).catch(() => {});
+        } else {
+          if (aj.status === 'stale') toast('error', 'A previous corpus import was interrupted by a server restart');
+          else if (aj.status === 'error') toast('error', aj.error || 'A previous corpus import failed');
+          jobsApi.deleteActive(aj.id).catch(() => {});
+        }
+        break; // Only handle first corpus_import flag
       }
-    };
-    poll();
-    return () => { cancelled = true; if (pollingRef.current) clearInterval(pollingRef.current); };
+    }).catch(() => { /* auth not ready or API unavailable */ });
+
+    return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
   }, []);
 
   const handleImport = async () => {
@@ -202,6 +260,8 @@ export function BuildCorpus({ onCorpusChanged }: Props) {
       const failures: Array<{ url: string; error: string }> = [];
       let totalAdded = 0;
 
+      let currentJobId: string | null = null;
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -211,6 +271,7 @@ export function BuildCorpus({ onCorpusChanged }: Props) {
           try {
             const data = JSON.parse(line.slice(6));
             if (data.status === 'started' && data.job_id) {
+              currentJobId = data.job_id;
               sessionStorage.setItem('geo_corpus_import_job_id', data.job_id);
             } else if (data.status === 'progress') {
               setImportProgress({ completed: data.completed, total: data.total, added: data.added, failedCount: data.failed_count });
@@ -236,9 +297,24 @@ export function BuildCorpus({ onCorpusChanged }: Props) {
       setDiscovered(null);
       setPickedUrls(new Set());
       if (selectedQs) setCorpusSetName(formatSetName(selectedQs.name));
+
+      // Clean up persistent active-job flag (created by backend)
+      if (currentJobId) {
+        jobsApi.listActive().then(({ active_jobs }) => {
+          active_jobs
+            .filter((a) => a.job_type === 'corpus_import')
+            .forEach((a) => jobsApi.deleteActive(a.id).catch(() => {}));
+        }).catch(() => {});
+      }
     } catch {
       toast('error', 'Import failed');
       sessionStorage.removeItem('geo_corpus_import_job_id');
+      // Clean up persistent flag on error too
+      jobsApi.listActive().then(({ active_jobs }) => {
+        active_jobs
+          .filter((a) => a.job_type === 'corpus_import')
+          .forEach((a) => jobsApi.deleteActive(a.id).catch(() => {}));
+      }).catch(() => {});
     } finally {
       setImporting(false);
       setImportProgress(null);

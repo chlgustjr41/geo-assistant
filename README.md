@@ -56,14 +56,14 @@ Each authenticated user gets their own SQLite database at `backend/data/users/<s
 
 ## Job Tracking & Recovery
 
-Long-running operations (rule extraction, article rewrite, GEO evaluation) are tracked via:
+All four long-running operations (rule extraction, article rewrite, GEO evaluation, and corpus import) are tracked via:
 
 1. **In-memory job manager** — tracks running jobs with progress, status, and results
-2. **Persistent active-job flags** — stored in the user's per-user SQLite `active_jobs` table
+2. **Persistent active-job flags** — stored in the user's per-user SQLite `active_jobs` table with full config for UI recovery
 
 This enables recovery across:
 - **Browser refresh** — frontend polls `GET /api/jobs/{id}` to resume
-- **Sign-out/sign-in** — frontend checks `GET /api/jobs/active/list` which cross-references DB flags with in-memory state
+- **Sign-out/sign-in** — frontend checks `GET /api/jobs/active/list` which cross-references DB flags with in-memory state. Stored config is used to restore UI settings (selected rule sets, batch mode, query set selection, etc.)
 - **Server restart** — stale flags are detected and the user is notified
 
 ## Quick Start (Local Development)

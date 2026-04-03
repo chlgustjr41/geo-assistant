@@ -31,6 +31,7 @@ export function useWritingAssistant() {
   const [evaluating, setEvaluating] = useState(false);
   const [rewriteProgress, setRewriteProgress] = useState<Record<string, unknown> | null>(null);
   const [evalProgress, setEvalProgress] = useState<Record<string, unknown> | null>(null);
+  const [recoveredEvalConfig, setRecoveredEvalConfig] = useState<Record<string, unknown> | null>(null);
   const rewriteTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const evalTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -150,6 +151,8 @@ export function useWritingAssistant() {
             if (cfg?.rule_set_ids && Array.isArray(cfg.rule_set_ids)) {
               localStorage.setItem('geo_selected_rule_sets', JSON.stringify(cfg.rule_set_ids));
             }
+            // Expose recovered eval settings (batch_mode, batch_query_count)
+            if (cfg) setRecoveredEvalConfig(cfg);
             if (aj.status === 'running') {
               pollEvalJob(aj.job_id);
             } else if (aj.status === 'complete') {
@@ -343,6 +346,7 @@ export function useWritingAssistant() {
     ruleSets, history,
     scraping, rewriting, evaluating,
     rewriteProgress, evalProgress,
+    recoveredEvalConfig,
     scrapeUrl, rewrite, evaluateGeo,
     loadRuleSets, loadHistory, deleteFromHistory,
     reset,
