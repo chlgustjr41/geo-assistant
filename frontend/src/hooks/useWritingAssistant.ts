@@ -49,7 +49,10 @@ export function useWritingAssistant() {
           setRewriting(false);
           setRewriteProgress(null);
           setRewriteResult(job.result as RewriteResponse);
-          return job.result as RewriteResponse;
+          // Clean up any persistent active-job flags for rewrite
+          jobsApi.listActive().then(({ active_jobs }) => {
+            active_jobs.filter((a) => a.job_type === 'rewrite').forEach((a) => jobsApi.deleteActive(a.id).catch(() => {}));
+          }).catch(() => {});
         } else if (job.status === 'error') {
           clearInterval(rewriteTimerRef.current!);
           rewriteTimerRef.current = null;
@@ -57,6 +60,9 @@ export function useWritingAssistant() {
           setRewriting(false);
           setRewriteProgress(null);
           toast('error', job.error || 'Rewrite failed');
+          jobsApi.listActive().then(({ active_jobs }) => {
+            active_jobs.filter((a) => a.job_type === 'rewrite').forEach((a) => jobsApi.deleteActive(a.id).catch(() => {}));
+          }).catch(() => {});
         }
       } catch {
         clearInterval(rewriteTimerRef.current!);
@@ -83,6 +89,9 @@ export function useWritingAssistant() {
           setEvaluating(false);
           setEvalProgress(null);
           setGeoResult(job.result as MultiGeoEvalResponse);
+          jobsApi.listActive().then(({ active_jobs }) => {
+            active_jobs.filter((a) => a.job_type === 'geo_evaluation').forEach((a) => jobsApi.deleteActive(a.id).catch(() => {}));
+          }).catch(() => {});
         } else if (job.status === 'error') {
           clearInterval(evalTimerRef.current!);
           evalTimerRef.current = null;
@@ -90,6 +99,9 @@ export function useWritingAssistant() {
           setEvaluating(false);
           setEvalProgress(null);
           toast('error', job.error || 'Evaluation failed');
+          jobsApi.listActive().then(({ active_jobs }) => {
+            active_jobs.filter((a) => a.job_type === 'geo_evaluation').forEach((a) => jobsApi.deleteActive(a.id).catch(() => {}));
+          }).catch(() => {});
         }
       } catch {
         clearInterval(evalTimerRef.current!);
@@ -101,12 +113,49 @@ export function useWritingAssistant() {
     }, POLL_INTERVAL);
   }, [setGeoResult]);
 
-  // Recover running jobs on mount (browser refresh)
+  // Recover running jobs on mount — checks both sessionStorage (same-session refresh)
+  // and persistent DB flags (survives sign-out/sign-in)
   useEffect(() => {
+    // First try sessionStorage (faster, no API call)
     const savedRewriteJobId = sessionStorage.getItem(REWRITE_JOB_KEY);
     if (savedRewriteJobId) pollRewriteJob(savedRewriteJobId);
     const savedEvalJobId = sessionStorage.getItem(EVAL_JOB_KEY);
     if (savedEvalJobId) pollEvalJob(savedEvalJobId);
+
+    // Also check persistent DB flags (covers sign-out/sign-in recovery)
+    if (!savedRewriteJobId || !savedEvalJobId) {
+      jobsApi.listActive().then(({ active_jobs }) => {
+        for (const aj of active_jobs) {
+          if (aj.job_type === 'rewrite' && !savedRewriteJobId) {
+            if (aj.status === 'running') {
+              pollRewriteJob(aj.job_id);
+            } else if (aj.status === 'complete' && aj.result) {
+              setRewriteResult(aj.result as RewriteResponse);
+              toast('success', 'Rewrite completed while you were away');
+              jobsApi.deleteActive(aj.id).catch(() => {});
+            } else {
+              if (aj.status === 'stale') toast('error', 'A previous rewrite was interrupted by a server restart');
+              else if (aj.status === 'error') toast('error', aj.error || 'A previous rewrite failed');
+              jobsApi.deleteActive(aj.id).catch(() => {});
+            }
+          }
+          if (aj.job_type === 'geo_evaluation' && !savedEvalJobId) {
+            if (aj.status === 'running') {
+              pollEvalJob(aj.job_id);
+            } else if (aj.status === 'complete') {
+              // Eval results are large — just notify, user can re-run
+              toast('success', 'GEO evaluation completed while you were away');
+              jobsApi.deleteActive(aj.id).catch(() => {});
+            } else {
+              if (aj.status === 'stale') toast('error', 'A previous evaluation was interrupted by a server restart');
+              else if (aj.status === 'error') toast('error', aj.error || 'A previous evaluation failed');
+              jobsApi.deleteActive(aj.id).catch(() => {});
+            }
+          }
+        }
+      }).catch(() => { /* auth not ready or API unavailable */ });
+    }
+
     return () => {
       if (rewriteTimerRef.current) clearInterval(rewriteTimerRef.current);
       if (evalTimerRef.current) clearInterval(evalTimerRef.current);

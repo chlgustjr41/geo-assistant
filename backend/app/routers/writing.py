@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ..deps import get_user_db as get_db, get_user_email
-from ..models import Article, RuleSet, CorpusDocument, CorpusSet
+from ..models import Article, RuleSet, CorpusDocument, CorpusSet, ActiveJob
 from ..services.article_scraper import scrape_url
 from ..services import geo_rewriter, geo_evaluator
 from ..database import get_user_session_factory
@@ -222,6 +222,15 @@ async def rewrite_article(
     job = job_manager.create_job("rewrite", user_email or "")
     job_manager.update_progress(job.id, {"stage": "starting"})
 
+    # Persist active-job flag
+    active_flag = ActiveJob(
+        job_type="rewrite", job_id=job.id,
+        config_json=json.dumps({"model": body.model, "rule_set_ids": body.rule_set_ids}),
+    )
+    db.add(active_flag)
+    db.commit()
+    active_flag_id = active_flag.id
+
     async def _run_rewrite():
         try:
             if len(loaded) == 1:
@@ -246,8 +255,25 @@ async def rewrite_article(
                 "rule_set_ids": body.rule_set_ids,
             }
             job_manager.complete_job(job.id, result)
+            # Update persistent flag
+            from ..database import get_user_session_factory
+            _fdb = get_user_session_factory(user_email)()
+            flag = _fdb.query(ActiveJob).filter(ActiveJob.id == active_flag_id).first()
+            if flag:
+                flag.status = "complete"
+                flag.result_json = json.dumps(result)
+                _fdb.commit()
+            _fdb.close()
         except Exception as e:
             job_manager.fail_job(job.id, str(e))
+            from ..database import get_user_session_factory
+            _fdb = get_user_session_factory(user_email)()
+            flag = _fdb.query(ActiveJob).filter(ActiveJob.id == active_flag_id).first()
+            if flag:
+                flag.status = "error"
+                flag.error = str(e)
+                _fdb.commit()
+            _fdb.close()
 
     asyncio.create_task(_run_rewrite())
     return {"job_id": job.id}
@@ -328,6 +354,15 @@ async def evaluate_geo(
     total_queries = len(batch_queries) if batch_queries else 1
     job_manager.update_progress(job.id, {"stage": "starting", "completed": 0, "total": total_queries})
 
+    # Persist active-job flag
+    active_flag = ActiveJob(
+        job_type="geo_evaluation", job_id=job.id,
+        config_json=json.dumps({"batch_mode": body.batch_mode, "query_count": total_queries}),
+    )
+    db.add(active_flag)
+    db.commit()
+    active_flag_id = active_flag.id
+
     async def _run_evaluation():
         try:
             def on_query_progress(completed: int, total: int, current_query: str | None = None):
@@ -351,8 +386,23 @@ async def evaluate_geo(
                 on_progress=on_query_progress,
             )
             job_manager.complete_job(job.id, result)
+            from ..database import get_user_session_factory
+            _fdb = get_user_session_factory(user_email)()
+            flag = _fdb.query(ActiveJob).filter(ActiveJob.id == active_flag_id).first()
+            if flag:
+                flag.status = "complete"
+                _fdb.commit()
+            _fdb.close()
         except Exception as e:
             job_manager.fail_job(job.id, str(e))
+            from ..database import get_user_session_factory
+            _fdb = get_user_session_factory(user_email)()
+            flag = _fdb.query(ActiveJob).filter(ActiveJob.id == active_flag_id).first()
+            if flag:
+                flag.status = "error"
+                flag.error = str(e)
+                _fdb.commit()
+            _fdb.close()
 
     asyncio.create_task(_run_evaluation())
     return {"job_id": job.id}

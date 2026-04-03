@@ -63,6 +63,16 @@ def _ensure_user_db(email: str) -> sessionmaker:
                 query_set_id VARCHAR,
                 created_at DATETIME
             )""",
+            """CREATE TABLE IF NOT EXISTS active_jobs (
+                id VARCHAR PRIMARY KEY,
+                job_type VARCHAR NOT NULL,
+                job_id VARCHAR NOT NULL,
+                config_json TEXT,
+                status VARCHAR DEFAULT 'running',
+                result_json TEXT,
+                error VARCHAR,
+                created_at DATETIME
+            )""",
         ]:
             try:
                 conn.execute(text(stmt))
@@ -100,6 +110,16 @@ def _get_shared_session_factory() -> sessionmaker:
                 id VARCHAR PRIMARY KEY,
                 name VARCHAR NOT NULL,
                 query_set_id VARCHAR,
+                created_at DATETIME
+            )""",
+            """CREATE TABLE IF NOT EXISTS active_jobs (
+                id VARCHAR PRIMARY KEY,
+                job_type VARCHAR NOT NULL,
+                job_id VARCHAR NOT NULL,
+                config_json TEXT,
+                status VARCHAR DEFAULT 'running',
+                result_json TEXT,
+                error VARCHAR,
                 created_at DATETIME
             )""",
         ]:

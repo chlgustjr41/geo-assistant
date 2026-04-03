@@ -4,6 +4,7 @@ import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { toast } from '../shared/Toast';
 import { GE_MODELS } from '../../types';
 import { jobsApi, getAuthHeaders, apiUrl } from '../../services/api';
+import type { ActiveJobFlag } from '../../services/api';
 import { useRulesCorpusContext } from '../../contexts/RulesCorpusContext';
 import { useExtractionContext } from '../../contexts/ExtractionContext';
 
@@ -108,22 +109,78 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
   };
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeJobRef = useRef<ActiveJobFlag | null>(null);
 
-  // ── Recover running job on mount (e.g. after browser refresh) ──
-  useEffect(() => {
-    const savedJobId = sessionStorage.getItem('geo_extraction_job_id');
-    if (!savedJobId) return;
-
-    let cancelled = false;
-    const poll = async () => {
+  /** Start polling an in-memory job by its job_id, with optional persistent active-job flag ID. */
+  const startPolling = (memJobId: string, activeFlag?: ActiveJobFlag | null) => {
+    if (activeFlag) activeJobRef.current = activeFlag;
+    setExtracting(true);
+    setStep('extracting');
+    if (pollingRef.current) clearInterval(pollingRef.current);
+    pollingRef.current = setInterval(async () => {
       try {
-        const job = await jobsApi.get(savedJobId);
+        const j = await jobsApi.get(memJobId);
+        if (j.status === 'running' && j.progress && 'stage' in j.progress) {
+          const p = j.progress as Record<string, unknown>;
+          setProgress({
+            stage: String(p.stage ?? ''),
+            completed: Number(p.completed ?? 0),
+            total: Number(p.total ?? 1),
+            model: String(p.model ?? ''),
+            model_index: Number(p.model_index ?? 0),
+            model_total: Number(p.model_total ?? 1),
+          });
+        } else if (j.status === 'complete') {
+          if (pollingRef.current) clearInterval(pollingRef.current);
+          pollingRef.current = null;
+          setStep('done');
+          setExtracting(false);
+          if (Array.isArray(j.result)) setExtractionResults(j.result as ExtractionResult[]);
+          // Clean up persistent flag
+          if (activeJobRef.current) {
+            jobsApi.deleteActive(activeJobRef.current.id).catch(() => {});
+            activeJobRef.current = null;
+          }
+          onRuleSetSaved?.();
+          toast('success', 'Rule extraction complete');
+        } else if (j.status === 'error') {
+          if (pollingRef.current) clearInterval(pollingRef.current);
+          pollingRef.current = null;
+          setStep('config');
+          setExtracting(false);
+          if (activeJobRef.current) {
+            jobsApi.deleteActive(activeJobRef.current.id).catch(() => {});
+            activeJobRef.current = null;
+          }
+          toast('error', j.error || 'Extraction failed');
+        }
+      } catch {
+        if (pollingRef.current) clearInterval(pollingRef.current);
+        pollingRef.current = null;
+        setStep('config');
+        setExtracting(false);
+        if (activeJobRef.current) {
+          jobsApi.deleteActive(activeJobRef.current.id).catch(() => {});
+          activeJobRef.current = null;
+        }
+      }
+    }, 3000);
+  };
+
+  // ── Recover running job on mount (checks persistent DB flags) ──
+  useEffect(() => {
+    let cancelled = false;
+    const recover = async () => {
+      try {
+        const { active_jobs } = await jobsApi.listActive();
         if (cancelled) return;
-        if (job.status === 'running') {
-          setExtracting(true);
-          setStep('extracting');
-          if (job.progress && typeof job.progress === 'object' && 'stage' in job.progress) {
-            const p = job.progress as Record<string, unknown>;
+        const extractionJob = active_jobs.find((j) => j.job_type === 'extraction');
+        if (!extractionJob) return;
+
+        if (extractionJob.status === 'running') {
+          // Job is still running in memory — resume polling
+          if (extractionJob.progress && 'stage' in extractionJob.progress) {
+            const p = extractionJob.progress;
             setProgress({
               stage: String(p.stage ?? ''),
               completed: Number(p.completed ?? 0),
@@ -133,56 +190,29 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
               model_total: Number(p.model_total ?? 1),
             });
           }
-          // Keep polling
-          pollingRef.current = setInterval(async () => {
-            try {
-              const j = await jobsApi.get(savedJobId);
-              if (j.status === 'running' && j.progress && 'stage' in j.progress) {
-                const p = j.progress as Record<string, unknown>;
-                setProgress({
-                  stage: String(p.stage ?? ''),
-                  completed: Number(p.completed ?? 0),
-                  total: Number(p.total ?? 1),
-                  model: String(p.model ?? ''),
-                  model_index: Number(p.model_index ?? 0),
-                  model_total: Number(p.model_total ?? 1),
-                });
-              } else if (j.status === 'complete') {
-                if (pollingRef.current) clearInterval(pollingRef.current);
-                sessionStorage.removeItem('geo_extraction_job_id');
-                setStep('done');
-                setExtracting(false);
-                if (Array.isArray(j.result)) setExtractionResults(j.result as ExtractionResult[]);
-                onRuleSetSaved?.();
-                toast('success', 'Rule extraction complete');
-              } else if (j.status === 'error') {
-                if (pollingRef.current) clearInterval(pollingRef.current);
-                sessionStorage.removeItem('geo_extraction_job_id');
-                setStep('config');
-                setExtracting(false);
-                toast('error', j.error || 'Extraction failed');
-              }
-            } catch {
-              // Job expired or server restarted
-              if (pollingRef.current) clearInterval(pollingRef.current);
-              sessionStorage.removeItem('geo_extraction_job_id');
-              setStep('config');
-              setExtracting(false);
-            }
-          }, 3000);
-        } else if (job.status === 'complete') {
-          sessionStorage.removeItem('geo_extraction_job_id');
+          startPolling(extractionJob.job_id, extractionJob);
+        } else if (extractionJob.status === 'complete') {
+          // Job finished while user was away — show results
           setStep('done');
-          if (Array.isArray(job.result)) setExtractionResults(job.result as ExtractionResult[]);
+          if (Array.isArray(extractionJob.result)) {
+            setExtractionResults(extractionJob.result as ExtractionResult[]);
+          }
           onRuleSetSaved?.();
-        } else {
-          sessionStorage.removeItem('geo_extraction_job_id');
+          toast('success', 'Rule extraction completed while you were away');
+          jobsApi.deleteActive(extractionJob.id).catch(() => {});
+        } else if (extractionJob.status === 'error') {
+          toast('error', extractionJob.error || 'A previous extraction failed');
+          jobsApi.deleteActive(extractionJob.id).catch(() => {});
+        } else if (extractionJob.status === 'stale') {
+          // Server restarted — job is lost
+          toast('error', 'A previous extraction was interrupted by a server restart');
+          jobsApi.deleteActive(extractionJob.id).catch(() => {});
         }
       } catch {
-        sessionStorage.removeItem('geo_extraction_job_id');
+        // API not available yet or auth not ready — ignore
       }
     };
-    poll();
+    recover();
     return () => { cancelled = true; if (pollingRef.current) clearInterval(pollingRef.current); };
   }, []);
 
@@ -229,6 +259,8 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
           try {
             const data = JSON.parse(line.slice(6));
             if (data.status === 'corpus_info') {
+              // The backend already persisted the active-job flag in DB;
+              // just track the in-memory job_id for SSE fallback polling
               if (data.job_id) sessionStorage.setItem('geo_extraction_job_id', data.job_id);
             } else if (data.stage) {
               setProgress({ stage: data.stage, completed: data.completed, total: data.total, model: data.model ?? '', model_index: data.model_index ?? 0, model_total: data.model_total ?? 1 });

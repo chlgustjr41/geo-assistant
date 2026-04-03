@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 from ..deps import get_user_db as get_db, get_user_email
-from ..models import RuleSet, CorpusDocument, CorpusSet, QuerySet
+from ..models import RuleSet, CorpusDocument, CorpusSet, QuerySet, ActiveJob
 from .. import job_manager
 
 logger = logging.getLogger(__name__)
@@ -257,6 +257,28 @@ async def extract_rules_endpoint(body: ExtractRulesRequest, db: Session = Depend
 
     job = job_manager.create_job("extraction", user_email or "")
 
+    # Persist active-job flag in user's DB (survives sign-out + refresh)
+    active_job_id: str | None = None
+    try:
+        user_sf = get_user_session_factory(user_email)
+        _adb = user_sf()
+        active = ActiveJob(
+            job_type="extraction",
+            job_id=job.id,
+            config_json=json.dumps({
+                "rule_set_name": body.rule_set_name,
+                "engine_models": body.engine_models,
+                "query_count": len(body.queries),
+                "corpus_doc_count": len(corpus_rows),
+            }),
+        )
+        _adb.add(active)
+        _adb.commit()
+        active_job_id = active.id
+        _adb.close()
+    except Exception:
+        pass
+
     async def event_generator():
         queue: asyncio.Queue = asyncio.Queue()
         model_total = len(body.engine_models)
@@ -299,6 +321,17 @@ async def extract_rules_endpoint(body: ExtractRulesRequest, db: Session = Depend
                 item = await asyncio.wait_for(queue.get(), timeout=900)
             except asyncio.TimeoutError:
                 job_manager.fail_job(job.id, "Timeout")
+                if active_job_id:
+                    try:
+                        _tdb = get_user_session_factory(user_email)()
+                        flag = _tdb.query(ActiveJob).filter(ActiveJob.id == active_job_id).first()
+                        if flag:
+                            flag.status = "error"
+                            flag.error = "Timeout"
+                            _tdb.commit()
+                        _tdb.close()
+                    except Exception:
+                        pass
                 yield {"data": json.dumps({"status": "error", "message": "Timeout"})}
                 task.cancel()
                 return
@@ -318,6 +351,18 @@ async def extract_rules_endpoint(body: ExtractRulesRequest, db: Session = Depend
                 yield {"data": json.dumps({"status": "model_complete", "result": item["saved"]})}
             elif "done" in item:
                 job_manager.complete_job(job.id, all_saved)
+                # Clear persistent active-job flag
+                if active_job_id:
+                    try:
+                        _cdb = get_user_session_factory(user_email)()
+                        flag = _cdb.query(ActiveJob).filter(ActiveJob.id == active_job_id).first()
+                        if flag:
+                            flag.status = "complete"
+                            flag.result_json = json.dumps(all_saved)
+                            _cdb.commit()
+                        _cdb.close()
+                    except Exception:
+                        pass
                 yield {"data": json.dumps({"status": "complete", "results": all_saved})}
                 return
 

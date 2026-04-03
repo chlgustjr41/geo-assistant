@@ -191,9 +191,23 @@ export interface JobStatus {
   error: string | null;
 }
 
+export interface ActiveJobFlag {
+  id: string;
+  job_type: string;
+  job_id: string;
+  status: 'running' | 'complete' | 'error' | 'stale';
+  progress?: Record<string, unknown>;
+  result?: unknown;
+  error?: string | null;
+  config?: Record<string, unknown> | null;
+  created_at?: string | null;
+}
+
 export const jobsApi = {
   list: () => api.get<{ jobs: JobStatus[] }>('/api/jobs').then((r) => r.data),
   get: (id: string) => api.get<JobStatus>(`/api/jobs/${id}`).then((r) => r.data),
+  listActive: () => api.get<{ active_jobs: ActiveJobFlag[] }>('/api/jobs/active/list').then((r) => r.data),
+  deleteActive: (activeId: string) => api.delete<{ ok: boolean }>(`/api/jobs/active/${activeId}`).then((r) => r.data),
 };
 
 /** Get auth headers for SSE fetch calls (which bypass axios). */

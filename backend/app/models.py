@@ -81,6 +81,22 @@ class CorpusSet(Base):
     )
 
 
+class ActiveJob(Base):
+    """Persistent flag for long-running jobs that must survive sign-out/refresh."""
+    __tablename__ = "active_jobs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    job_type: Mapped[str] = mapped_column(String, nullable=False)  # "extraction", "rewrite", "geo_evaluation"
+    job_id: Mapped[str] = mapped_column(String, nullable=False)     # in-memory job_manager ID
+    config_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # request params for display
+    status: Mapped[str] = mapped_column(String, default="running")  # running, complete, error, stale
+    result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class CorpusDocument(Base):
     __tablename__ = "corpus_documents"
 
