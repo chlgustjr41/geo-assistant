@@ -357,7 +357,7 @@ async def evaluate_geo(
     # Persist active-job flag
     active_flag = ActiveJob(
         job_type="geo_evaluation", job_id=job.id,
-        config_json=json.dumps({"batch_mode": body.batch_mode, "query_count": total_queries}),
+        config_json=json.dumps({"batch_mode": body.batch_mode, "query_count": total_queries, "rule_set_ids": body.rule_set_ids}),
     )
     db.add(active_flag)
     db.commit()

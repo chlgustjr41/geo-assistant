@@ -268,6 +268,8 @@ async def extract_rules_endpoint(body: ExtractRulesRequest, db: Session = Depend
             config_json=json.dumps({
                 "rule_set_name": body.rule_set_name,
                 "engine_models": body.engine_models,
+                "query_set_id": body.query_set_id,
+                "corpus_set_ids": resolved_set_ids,
                 "query_count": len(body.queries),
                 "corpus_doc_count": len(corpus_rows),
             }),

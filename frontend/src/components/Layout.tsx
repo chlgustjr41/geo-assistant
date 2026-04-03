@@ -40,9 +40,11 @@ export function Layout() {
     const base: TabDef[] = [
       { id: "writing", label: "Writing Assistant" },
       { id: "rules", label: "Rules & Corpus" },
-      { id: "settings", label: "Settings" },
     ];
-    if (isAdmin) base.push({ id: "admin", label: "Admin" });
+    if (isAdmin) {
+      base.push({ id: "settings", label: "Settings" });
+      base.push({ id: "admin", label: "Admin" });
+    }
     return base;
   }, [isAdmin]);
 
@@ -131,9 +133,11 @@ export function Layout() {
         <div className={activeTab !== "rules" ? "hidden" : ""}>
           <RulesAndCorpus />
         </div>
-        <div className={activeTab !== "settings" ? "hidden" : ""}>
-          <Settings />
-        </div>
+        {isAdmin && (
+          <div className={activeTab !== "settings" ? "hidden" : ""}>
+            <Settings />
+          </div>
+        )}
         {isAdmin && (
           <div className={activeTab !== "admin" ? "hidden" : ""}>
             <Admin />

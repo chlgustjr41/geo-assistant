@@ -126,7 +126,13 @@ export function useWritingAssistant() {
     if (!savedRewriteJobId || !savedEvalJobId) {
       jobsApi.listActive().then(({ active_jobs }) => {
         for (const aj of active_jobs) {
+          const cfg = aj.config as Record<string, unknown> | null;
+
           if (aj.job_type === 'rewrite' && !savedRewriteJobId) {
+            // Restore selected rule sets from config
+            if (cfg?.rule_set_ids && Array.isArray(cfg.rule_set_ids)) {
+              localStorage.setItem('geo_selected_rule_sets', JSON.stringify(cfg.rule_set_ids));
+            }
             if (aj.status === 'running') {
               pollRewriteJob(aj.job_id);
             } else if (aj.status === 'complete' && aj.result) {
@@ -140,6 +146,10 @@ export function useWritingAssistant() {
             }
           }
           if (aj.job_type === 'geo_evaluation' && !savedEvalJobId) {
+            // Restore selected rule sets from config
+            if (cfg?.rule_set_ids && Array.isArray(cfg.rule_set_ids)) {
+              localStorage.setItem('geo_selected_rule_sets', JSON.stringify(cfg.rule_set_ids));
+            }
             if (aj.status === 'running') {
               pollEvalJob(aj.job_id);
             } else if (aj.status === 'complete') {

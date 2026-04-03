@@ -111,6 +111,16 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeJobRef = useRef<ActiveJobFlag | null>(null);
 
+  /** Restore form fields from the active job's config. */
+  const restoreConfigFromFlag = (flag: ActiveJobFlag) => {
+    const cfg = flag.config as Record<string, unknown> | null;
+    if (!cfg) return;
+    if (cfg.rule_set_name) setRuleSetName(String(cfg.rule_set_name));
+    if (Array.isArray(cfg.engine_models)) setSelectedModels(cfg.engine_models as string[]);
+    if (cfg.query_set_id) setSelectedQsId(String(cfg.query_set_id));
+    if (Array.isArray(cfg.corpus_set_ids)) setSelectedCorpusSetIds(cfg.corpus_set_ids as string[]);
+  };
+
   /** Start polling an in-memory job by its job_id, with optional persistent active-job flag ID. */
   const startPolling = (memJobId: string, activeFlag?: ActiveJobFlag | null) => {
     if (activeFlag) activeJobRef.current = activeFlag;
@@ -178,6 +188,8 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
         if (!extractionJob) return;
 
         if (extractionJob.status === 'running') {
+          // Restore form fields from config
+          restoreConfigFromFlag(extractionJob);
           // Job is still running in memory — resume polling
           if (extractionJob.progress && 'stage' in extractionJob.progress) {
             const p = extractionJob.progress;
@@ -192,6 +204,8 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
           }
           startPolling(extractionJob.job_id, extractionJob);
         } else if (extractionJob.status === 'complete') {
+          // Restore form fields so user sees what was configured
+          restoreConfigFromFlag(extractionJob);
           // Job finished while user was away — show results
           setStep('done');
           if (Array.isArray(extractionJob.result)) {
