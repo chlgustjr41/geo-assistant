@@ -588,7 +588,7 @@ export function BuildCorpus({ onCorpusChanged }: Props) {
             <input type="text" value={textTitle} onChange={(e) => setTextTitle(e.target.value)} placeholder="Title (optional)"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             <textarea value={textContent} onChange={(e) => setTextContent(e.target.value)} placeholder="Paste article content here…" rows={4}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none" />
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 resize-y" />
             <button onClick={handleAddText} disabled={adding || !textContent.trim()}
               className="flex items-center gap-1.5 px-4 py-2 bg-primary-400 text-white rounded-lg text-sm font-medium hover:bg-primary-500 disabled:opacity-50">
               {adding ? <LoadingSpinner size="sm" /> : <Plus size={14} />} Add Document
