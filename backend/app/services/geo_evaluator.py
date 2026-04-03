@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 import asyncio
 from dataclasses import dataclass, field
+from typing import Callable
 
 from . import llm_client
 from .llm_client import get_pipeline_model
@@ -368,6 +369,7 @@ async def evaluate_geo_multi(
     corpus_doc_metadata: list[dict] | None = None,
     engine_models: list[str] | None = None,
     queries: list[str] | None = None,
+    on_progress: "Callable[[int, int, str | None], None] | None" = None,
 ) -> dict:
     """Run GEO evaluation against each unique GE engine model from the selected rule sets.
 
@@ -430,6 +432,9 @@ async def evaluate_geo_multi(
         for (q, _m), r in zip(task_keys, flat):
             qmap[q].append(r)
 
+        if on_progress:
+            on_progress(len(queries), len(queries), None)
+
         batch_query_results: list[dict] = []
         for q in queries:
             qr = qmap[q]
@@ -456,6 +461,8 @@ async def evaluate_geo_multi(
 
     else:
         # ── Single query mode ─────────────────────────────────────────────────
+        if on_progress:
+            on_progress(0, 1, None)
         query = test_query or await generate_test_query(original_content)
 
         retrieved_orig = bm25_retrieve(query, corpus_orig, k)
@@ -480,6 +487,9 @@ async def evaluate_geo_multi(
         for r in results:
             if "error" not in r:
                 r["evaluation_cost_usd"] = round(per_eval_cost, 4)
+
+        if on_progress:
+            on_progress(1, 1, query)
 
         combined = _combine_results(results, query) if len(results) > 1 else None
 

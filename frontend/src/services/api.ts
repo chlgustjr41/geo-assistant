@@ -4,8 +4,6 @@ import type {
   AppSettings,
   ScrapedArticle,
   RewriteRequest,
-  RewriteResponse,
-  MultiGeoEvalResponse,
   RuleSet,
   RuleSetDetail,
   ArticleHistoryItem,
@@ -68,7 +66,7 @@ export const writingApi = {
   scrapeUrl: (url: string) =>
     api.post<ScrapedArticle>('/api/writing/scrape-url', { url }).then((r) => r.data),
   rewrite: (req: RewriteRequest) =>
-    api.post<RewriteResponse>('/api/writing/rewrite', req).then((r) => r.data),
+    api.post<{ job_id: string }>('/api/writing/rewrite', req).then((r) => r.data),
   evaluateGeo: (req: {
     original_content: string;
     rewritten_content: string;
@@ -78,7 +76,7 @@ export const writingApi = {
     rule_set_ids?: string[];
     batch_mode?: boolean;
     batch_query_count?: number;
-  }) => api.post<MultiGeoEvalResponse>('/api/writing/evaluate-geo', req).then((r) => r.data),
+  }) => api.post<{ job_id: string }>('/api/writing/evaluate-geo', req).then((r) => r.data),
   getHistory: () =>
     api.get<ArticleHistoryItem[]>('/api/writing/history').then((r) => r.data),
   deleteHistory: (id: string) =>

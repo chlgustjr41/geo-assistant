@@ -1,13 +1,16 @@
 from __future__ import annotations
+import asyncio
 import json
 import random
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from ..deps import get_user_db as get_db
+from ..deps import get_user_db as get_db, get_user_email
 from ..models import Article, RuleSet, CorpusDocument, CorpusSet
 from ..services.article_scraper import scrape_url
 from ..services import geo_rewriter, geo_evaluator
+from ..database import get_user_session_factory
+from .. import job_manager
 
 router = APIRouter(prefix="/api/writing", tags=["writing"])
 
@@ -199,10 +202,15 @@ class RewriteRequest(BaseModel):
 
 
 @router.post("/rewrite")
-async def rewrite_article(body: RewriteRequest, db: Session = Depends(get_db)):
+async def rewrite_article(
+    body: RewriteRequest,
+    db: Session = Depends(get_db),
+    user_email: str | None = Depends(get_user_email),
+):
     if not body.rule_set_ids:
         raise HTTPException(400, "At least one rule set ID is required")
 
+    # Load rule sets synchronously before spawning background task
     loaded: list[tuple[str, list[str]]] = []
     for rsid in body.rule_set_ids:
         rs = db.query(RuleSet).filter(RuleSet.id == rsid).first()
@@ -211,33 +219,38 @@ async def rewrite_article(body: RewriteRequest, db: Session = Depends(get_db)):
         rules_data = json.loads(rs.rules_json)
         loaded.append((rs.name, rules_data.get("filtered_rules", [])))
 
-    if len(loaded) == 1:
-        filtered_rules = loaded[0][1]
-    else:
-        # Merge multiple rule sets via LLM before rewriting
+    job = job_manager.create_job("rewrite", user_email or "")
+    job_manager.update_progress(job.id, {"stage": "starting"})
+
+    async def _run_rewrite():
         try:
-            filtered_rules = await geo_rewriter.merge_rules(loaded)
+            if len(loaded) == 1:
+                filtered_rules = loaded[0][1]
+            else:
+                job_manager.update_progress(job.id, {"stage": "merging_rules"})
+                filtered_rules = await geo_rewriter.merge_rules(loaded)
+
+            job_manager.update_progress(job.id, {"stage": "rewriting"})
+            rewritten = await geo_rewriter.rewrite_article(
+                content=body.content,
+                model=body.model,
+                rule_set_rules=filtered_rules,
+                trend_keywords=body.trend_keywords,
+            )
+            result = {
+                "original_content": body.content,
+                "rewritten_content": rewritten,
+                "model_used": body.model,
+                "rules_applied": filtered_rules,
+                "trend_keywords_injected": body.trend_keywords,
+                "rule_set_ids": body.rule_set_ids,
+            }
+            job_manager.complete_job(job.id, result)
         except Exception as e:
-            raise HTTPException(400, f"Rule merge failed: {str(e)}")
+            job_manager.fail_job(job.id, str(e))
 
-    try:
-        rewritten = await geo_rewriter.rewrite_article(
-            content=body.content,
-            model=body.model,
-            rule_set_rules=filtered_rules,
-            trend_keywords=body.trend_keywords,
-        )
-    except Exception as e:
-        raise HTTPException(400, f"LLM rewrite failed: {str(e)}")
-
-    return {
-        "original_content": body.content,
-        "rewritten_content": rewritten,
-        "model_used": body.model,
-        "rules_applied": filtered_rules,
-        "trend_keywords_injected": body.trend_keywords,
-        "rule_set_ids": body.rule_set_ids,
-    }
+    asyncio.create_task(_run_rewrite())
+    return {"job_id": job.id}
 
 
 class EvaluateGeoRequest(BaseModel):
@@ -252,7 +265,11 @@ class EvaluateGeoRequest(BaseModel):
 
 
 @router.post("/evaluate-geo")
-async def evaluate_geo(body: EvaluateGeoRequest, db: Session = Depends(get_db)):
+async def evaluate_geo(
+    body: EvaluateGeoRequest,
+    db: Session = Depends(get_db),
+    user_email: str | None = Depends(get_user_email),
+):
     # Resolve corpus from rule set extraction metadata (same docs used during extraction)
     corpus_set_ids: list[str] = []
     engine_models: list[str] = []
@@ -307,19 +324,35 @@ async def evaluate_geo(body: EvaluateGeoRequest, db: Session = Depends(get_db)):
                 else:
                     batch_queries = deduped[:30]  # default cap
 
-    try:
-        result = await geo_evaluator.evaluate_geo_multi(
-            original_content=body.original_content,
-            rewritten_content=body.rewritten_content,
-            test_query=body.test_query,
-            num_competing_docs=body.num_competing_docs,
-            rules_applied=body.rules_applied,
-            corpus_docs=corpus_docs,
-            corpus_doc_metadata=corpus_doc_metadata,
-            engine_models=engine_models,
-            queries=batch_queries,
-        )
-    except Exception as e:
-        raise HTTPException(400, f"GEO evaluation failed: {str(e)}")
+    job = job_manager.create_job("geo_evaluation", user_email or "")
+    total_queries = len(batch_queries) if batch_queries else 1
+    job_manager.update_progress(job.id, {"stage": "starting", "completed": 0, "total": total_queries})
 
-    return result
+    async def _run_evaluation():
+        try:
+            def on_query_progress(completed: int, total: int, current_query: str | None = None):
+                job_manager.update_progress(job.id, {
+                    "stage": "evaluating",
+                    "completed": completed,
+                    "total": total,
+                    "current_query": current_query,
+                })
+
+            result = await geo_evaluator.evaluate_geo_multi(
+                original_content=body.original_content,
+                rewritten_content=body.rewritten_content,
+                test_query=body.test_query,
+                num_competing_docs=body.num_competing_docs,
+                rules_applied=body.rules_applied,
+                corpus_docs=corpus_docs,
+                corpus_doc_metadata=corpus_doc_metadata,
+                engine_models=engine_models,
+                queries=batch_queries,
+                on_progress=on_query_progress,
+            )
+            job_manager.complete_job(job.id, result)
+        except Exception as e:
+            job_manager.fail_job(job.id, str(e))
+
+    asyncio.create_task(_run_evaluation())
+    return {"job_id": job.id}

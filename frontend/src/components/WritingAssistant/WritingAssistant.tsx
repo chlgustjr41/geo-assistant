@@ -36,6 +36,7 @@ export function WritingAssistant() {
     rewriteResult, geoResult,
     ruleSets, history,
     scraping, rewriting, evaluating,
+    rewriteProgress, evalProgress,
     scrapeUrl, rewrite, evaluateGeo,
     loadRuleSets, loadHistory, deleteFromHistory,
     reset,
@@ -96,7 +97,9 @@ export function WritingAssistant() {
         >
           {rewriting ? <LoadingSpinner size="sm" /> : null}
           {rewriting
-            ? selectedRuleSetIds.length > 1 ? 'Merging rules & optimizing...' : 'Optimizing...'
+            ? (rewriteProgress?.stage === 'merging_rules' ? 'Merging rules...'
+              : rewriteProgress?.stage === 'rewriting' ? 'Optimizing article...'
+              : selectedRuleSetIds.length > 1 ? 'Merging rules & optimizing...' : 'Optimizing...')
             : 'Optimize Article'}
         </button>
 
@@ -237,7 +240,11 @@ export function WritingAssistant() {
               className="flex items-center gap-2 px-4 py-2 bg-primary-400 text-white rounded-lg text-sm font-medium hover:bg-primary-500 disabled:opacity-50 transition-colors"
             >
               {evaluating ? <LoadingSpinner size="sm" /> : <BarChart2 size={14} />}
-              {evaluating ? 'Evaluating...' : evalBatchMode ? `Run Batch GEO Evaluation (${evalBatchCount})` : 'Run GEO Evaluation'}
+              {evaluating
+                ? (evalProgress?.total && Number(evalProgress.total) > 1
+                    ? `Evaluating... ${evalProgress.completed ?? 0}/${evalProgress.total} queries`
+                    : 'Evaluating...')
+                : evalBatchMode ? `Run Batch GEO Evaluation (${evalBatchCount})` : 'Run GEO Evaluation'}
             </button>
           </div>
         </>
