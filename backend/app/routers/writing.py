@@ -288,6 +288,8 @@ class EvaluateGeoRequest(BaseModel):
     rule_set_ids: list[str] = []
     batch_mode: bool = False
     batch_query_count: int | None = None  # if set, randomly sample this many from the query set
+    batch_queries: list[str] | None = None  # explicit list of queries (manual selection)
+    corpus_set_ids: list[str] | None = None  # explicit corpus set override; None = derive from rule sets
 
 
 @router.post("/evaluate-geo")
@@ -296,18 +298,24 @@ async def evaluate_geo(
     db: Session = Depends(get_db),
     user_email: str | None = Depends(get_user_email),
 ):
-    # Resolve corpus from rule set extraction metadata (same docs used during extraction)
-    corpus_set_ids: list[str] = []
+    # Resolve engine models from rule sets
     engine_models: list[str] = []
     for rsid in body.rule_set_ids:
         rs = db.query(RuleSet).filter(RuleSet.id == rsid).first()
-        if rs:
-            if rs.engine_model:
-                engine_models.append(rs.engine_model)
-            if rs.extraction_metadata_json:
+        if rs and rs.engine_model:
+            engine_models.append(rs.engine_model)
+
+    # Resolve corpus sets: explicit override > derive from rule set metadata
+    if body.corpus_set_ids is not None:
+        corpus_set_ids = list(dict.fromkeys(body.corpus_set_ids))
+    else:
+        corpus_set_ids = []
+        for rsid in body.rule_set_ids:
+            rs = db.query(RuleSet).filter(RuleSet.id == rsid).first()
+            if rs and rs.extraction_metadata_json:
                 meta = json.loads(rs.extraction_metadata_json)
                 corpus_set_ids.extend(meta.get("corpus_set_ids", []))
-    corpus_set_ids = list(dict.fromkeys(corpus_set_ids))  # deduplicate, preserve order
+        corpus_set_ids = list(dict.fromkeys(corpus_set_ids))
 
     q = db.query(CorpusDocument)
     if corpus_set_ids:
@@ -329,36 +337,41 @@ async def evaluate_geo(
     # Collect queries for batch mode
     batch_queries: list[str] | None = None
     if body.batch_mode:
-        query_set_ids: list[str] = []
-        for rsid in body.rule_set_ids:
-            rs = db.query(RuleSet).filter(RuleSet.id == rsid).first()
-            if rs and rs.extraction_metadata_json:
-                meta = json.loads(rs.extraction_metadata_json)
-                if meta.get("query_set_id"):
-                    query_set_ids.append(meta["query_set_id"])
-        query_set_ids = list(dict.fromkeys(query_set_ids))
-        if query_set_ids:
-            from ..models import QuerySet as QuerySetModel
-            all_queries: list[str] = []
-            for qsid in query_set_ids:
-                qs = db.query(QuerySetModel).filter(QuerySetModel.id == qsid).first()
-                if qs:
-                    try:
-                        all_queries.extend(json.loads(qs.queries_json))
-                    except Exception:
-                        pass
-            # Deduplicate preserving order
-            seen: set[str] = set()
-            deduped: list[str] = []
-            for q_str in all_queries:
-                if q_str not in seen:
-                    seen.add(q_str)
-                    deduped.append(q_str)
-            if deduped:
-                if body.batch_query_count and 0 < body.batch_query_count < len(deduped):
-                    batch_queries = random.sample(deduped, body.batch_query_count)
-                else:
-                    batch_queries = deduped[:30]  # default cap
+        if body.batch_queries and len(body.batch_queries) > 0:
+            # Explicit manual selection from frontend
+            batch_queries = body.batch_queries[:30]
+        else:
+            # Random selection from linked query sets
+            query_set_ids: list[str] = []
+            for rsid in body.rule_set_ids:
+                rs = db.query(RuleSet).filter(RuleSet.id == rsid).first()
+                if rs and rs.extraction_metadata_json:
+                    meta = json.loads(rs.extraction_metadata_json)
+                    if meta.get("query_set_id"):
+                        query_set_ids.append(meta["query_set_id"])
+            query_set_ids = list(dict.fromkeys(query_set_ids))
+            if query_set_ids:
+                from ..models import QuerySet as QuerySetModel
+                all_queries: list[str] = []
+                for qsid in query_set_ids:
+                    qs = db.query(QuerySetModel).filter(QuerySetModel.id == qsid).first()
+                    if qs:
+                        try:
+                            all_queries.extend(json.loads(qs.queries_json))
+                        except Exception:
+                            pass
+                # Deduplicate preserving order
+                seen: set[str] = set()
+                deduped: list[str] = []
+                for q_str in all_queries:
+                    if q_str not in seen:
+                        seen.add(q_str)
+                        deduped.append(q_str)
+                if deduped:
+                    if body.batch_query_count and 0 < body.batch_query_count < len(deduped):
+                        batch_queries = random.sample(deduped, body.batch_query_count)
+                    else:
+                        batch_queries = deduped[:30]
 
     job = job_manager.create_job("geo_evaluation", user_email or "")
     total_queries = len(batch_queries) if batch_queries else 1

@@ -161,7 +161,44 @@ function ModelResult({ result, isCombined }: { result: GeoEvalResponse; isCombin
   return (
     <div className="space-y-6">
 
-      {/* 1. Score Cards */}
+      {/* 1. AI Response Comparison (first, not for Combined) */}
+      {hasResponses && (
+        <>
+          <div className="space-y-3">
+            <button
+              onClick={() => setResponsesCollapsed((v) => !v)}
+              className="flex items-center gap-2 group w-full"
+            >
+              <SectionLabel>AI Response Comparison</SectionLabel>
+              <span className="text-gray-400 group-hover:text-gray-600 transition-colors mb-3">
+                {responsesCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+              </span>
+            </button>
+
+            {!responsesCollapsed && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="rounded-lg border border-gray-200 overflow-hidden">
+                  <div className="px-4 py-2 bg-gray-50 border-b border-gray-200">
+                    <p className="text-xs font-semibold text-gray-600">Original Version</p>
+                    <p className="text-xs text-gray-400">AI response before optimization</p>
+                  </div>
+                  <MarkdownView content={result.ge_response_original} maxHeight="320px" className="border-0 rounded-none" />
+                </div>
+                <div className="rounded-lg border border-gray-200 overflow-hidden">
+                  <div className="px-4 py-2 bg-gray-50 border-b border-gray-200">
+                    <p className="text-xs font-semibold text-gray-600">Optimized Version</p>
+                    <p className="text-xs text-gray-400">AI response after optimization</p>
+                  </div>
+                  <MarkdownView content={result.ge_response_optimized} maxHeight="320px" className="border-0 rounded-none" />
+                </div>
+              </div>
+            )}
+          </div>
+          <Divider />
+        </>
+      )}
+
+      {/* 2. Score Cards */}
       <div>
         <SectionLabel>Visibility Scores</SectionLabel>
         <div className="grid grid-cols-4 gap-3">
@@ -174,7 +211,7 @@ function ModelResult({ result, isCombined }: { result: GeoEvalResponse; isCombin
 
       <Divider />
 
-      {/* 2. Score Commentary */}
+      {/* 3. Score Commentary */}
       {result.score_commentary && (
         <>
           <div>
@@ -191,57 +228,20 @@ function ModelResult({ result, isCombined }: { result: GeoEvalResponse; isCombin
         </>
       )}
 
-      {/* 3. Competing Sources */}
+      {/* 4. Competing Sources */}
       {!isCombined && totalCount > 0 && (
-        <>
-          <div>
-            <div className="flex items-baseline justify-between mb-3">
-              <SectionLabel>Competing Sources</SectionLabel>
-              <span className="text-xs text-gray-400 mb-3">
-                {citedCount} of {totalCount} cited &nbsp;&bull;&nbsp; {hasCorpus ? 'real corpus docs' : 'synthetic competitors'}
-              </span>
-            </div>
-            <div className="space-y-2.5">
-              {result.source_citations.map((c) => (
-                <SourceCitationCard key={c.source_id} citation={c} />
-              ))}
-            </div>
-          </div>
-          <Divider />
-        </>
-      )}
-
-      {/* 4. AI Response Comparison (inline, not for Combined) */}
-      {hasResponses && (
-        <div className="space-y-3">
-          <button
-            onClick={() => setResponsesCollapsed((v) => !v)}
-            className="flex items-center gap-2 group w-full"
-          >
-            <SectionLabel>AI Response Comparison</SectionLabel>
-            <span className="text-gray-400 group-hover:text-gray-600 transition-colors mb-3">
-              {responsesCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+        <div>
+          <div className="flex items-baseline justify-between mb-3">
+            <SectionLabel>Competing Sources</SectionLabel>
+            <span className="text-xs text-gray-400 mb-3">
+              {citedCount} of {totalCount} cited &nbsp;&bull;&nbsp; {hasCorpus ? 'real corpus docs' : 'synthetic competitors'}
             </span>
-          </button>
-
-          {!responsesCollapsed && (
-            <div className="grid grid-cols-2 gap-4">
-              <div className="rounded-lg border border-gray-200 overflow-hidden">
-                <div className="px-4 py-2 bg-gray-50 border-b border-gray-200">
-                  <p className="text-xs font-semibold text-gray-600">Original Version</p>
-                  <p className="text-xs text-gray-400">AI response before optimization</p>
-                </div>
-                <MarkdownView content={result.ge_response_original} maxHeight="320px" className="border-0 rounded-none" />
-              </div>
-              <div className="rounded-lg border border-gray-200 overflow-hidden">
-                <div className="px-4 py-2 bg-gray-50 border-b border-gray-200">
-                  <p className="text-xs font-semibold text-gray-600">Optimized Version</p>
-                  <p className="text-xs text-gray-400">AI response after optimization</p>
-                </div>
-                <MarkdownView content={result.ge_response_optimized} maxHeight="320px" className="border-0 rounded-none" />
-              </div>
-            </div>
-          )}
+          </div>
+          <div className="space-y-2.5">
+            {result.source_citations.map((c) => (
+              <SourceCitationCard key={c.source_id} citation={c} />
+            ))}
+          </div>
         </div>
       )}
     </div>

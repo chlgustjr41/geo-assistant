@@ -78,6 +78,8 @@ export const writingApi = {
     rule_set_ids?: string[];
     batch_mode?: boolean;
     batch_query_count?: number;
+    batch_queries?: string[];
+    corpus_set_ids?: string[];
   }) => api.post<{ job_id: string }>('/api/writing/evaluate-geo', req).then((r) => r.data),
   getHistory: () =>
     api.get<ArticleHistoryItem[]>('/api/writing/history').then((r) => r.data),

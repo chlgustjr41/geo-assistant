@@ -272,8 +272,16 @@ export function useWritingAssistant() {
     }
   };
 
-  const evaluateGeo = async (testQuery?: string, ruleSetIds?: string[], batchMode?: boolean, batchQueryCount?: number) => {
+  const evaluateGeo = async (opts?: {
+    testQuery?: string;
+    ruleSetIds?: string[];
+    batchMode?: boolean;
+    batchQueryCount?: number;
+    batchQueries?: string[];
+    corpusSetIds?: string[];
+  }) => {
     if (!rewriteResult) { toast('error', 'Run rewrite first'); return; }
+    const { testQuery, ruleSetIds, batchMode, batchQueryCount, batchQueries, corpusSetIds } = opts ?? {};
     setEvaluating(true);
     try {
       const { job_id } = await writingApi.evaluateGeo({
@@ -284,6 +292,8 @@ export function useWritingAssistant() {
         rule_set_ids: ruleSetIds ?? rewriteResult.rule_set_ids,
         batch_mode: batchMode ?? false,
         ...(batchMode && batchQueryCount ? { batch_query_count: batchQueryCount } : {}),
+        ...(batchMode && batchQueries && batchQueries.length > 0 ? { batch_queries: batchQueries } : {}),
+        ...(corpusSetIds ? { corpus_set_ids: corpusSetIds } : {}),
       });
       pollEvalJob(job_id);
     } catch {
