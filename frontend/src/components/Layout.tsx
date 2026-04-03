@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { RotateCcw } from "lucide-react";
 import { WritingAssistant } from "./WritingAssistant/WritingAssistant";
 import { RulesAndCorpus } from "./RulesAndCorpus/RulesAndCorpus";
 import { Settings } from "./Settings/Settings";
-import { ToastContainer } from "./shared/Toast";
+import { ToastContainer, toast } from "./shared/Toast";
+import { settingsApi } from "../services/api";
 import { useExtractionContext } from "../contexts/ExtractionContext";
 import type { Tab } from "../types";
 
@@ -17,9 +19,43 @@ const TABS: TabDef[] = [
   { id: "settings", label: "Settings" },
 ];
 
+// localStorage keys used by the app (cleared on workspace reset)
+const LOCAL_STORAGE_KEYS = [
+  'geo_article_text',
+  'geo_selected_rule_sets',
+  'geo_extractor_topic',
+  'geo_extractor_queries',
+  'geo_extractor_name',
+  'geo_extractor_models',
+  'geo_extractor_results',
+  'geo_extractor_use_corpus',
+];
+
 export function Layout() {
   const [activeTab, setActiveTab] = useState<Tab>("writing");
+  const [resetting, setResetting] = useState(false);
   const { extracting } = useExtractionContext();
+
+  const handleResetWorkspace = async () => {
+    if (!confirm(
+      'Reset workspace?\n\n' +
+      'This clears all input fields and cached data.\n' +
+      'Your saved query sets, corpus, rule sets, history, and settings are preserved.'
+    )) return;
+    setResetting(true);
+    try {
+      await settingsApi.resetWorkspace();
+      // Clear frontend persisted input state
+      LOCAL_STORAGE_KEYS.forEach((k) => localStorage.removeItem(k));
+      sessionStorage.clear();
+      toast('success', 'Workspace reset — reloading...');
+      setTimeout(() => window.location.reload(), 600);
+    } catch {
+      toast('error', 'Failed to reset workspace');
+    } finally {
+      setResetting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -34,7 +70,7 @@ export function Layout() {
                 Powered by AutoGEO &middot; ICLR 2026
               </p>
             </div>
-            <nav className="flex">
+            <nav className="flex flex-1">
               {TABS.map((tab) => (
                 <button
                   key={tab.id}
@@ -55,6 +91,15 @@ export function Layout() {
                 </button>
               ))}
             </nav>
+            <button
+              onClick={handleResetWorkspace}
+              disabled={resetting}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-400 border border-gray-200 rounded-lg hover:text-red-600 hover:border-red-300 hover:bg-red-50 disabled:opacity-50 transition-colors shrink-0"
+              title="Clear input fields and cached data. Saved query sets, corpus, rule sets, history, and settings are preserved."
+            >
+              <RotateCcw size={12} className={resetting ? 'animate-spin' : ''} />
+              Reset Workspace
+            </button>
           </div>
         </div>
       </header>

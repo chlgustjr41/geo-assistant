@@ -22,6 +22,10 @@ export const settingsApi = {
     default_model?: string;
     default_rule_set?: string;
   }) => api.put<{ ok: boolean }>('/api/settings/defaults', data).then((r) => r.data),
+  resetWorkspace: () =>
+    api.post<{ ok: boolean }>('/api/settings/reset-workspace').then((r) => r.data),
+  resetRulesCorpus: () =>
+    api.post<{ ok: boolean; builtin_rules_kept: number }>('/api/settings/reset-rules-corpus').then((r) => r.data),
 };
 
 export const writingApi = {

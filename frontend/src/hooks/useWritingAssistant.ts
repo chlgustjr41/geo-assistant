@@ -21,7 +21,7 @@ export function useWritingAssistant() {
   const [geoResult, setGeoResult] = useSessionStorage<MultiGeoEvalResponse | null>('geo_eval_result', null);
   const [ruleSets, setRuleSets] = useState<RuleSet[]>([]);
   const [history, setHistory] = useState<ArticleHistoryItem[]>([]);
-  const [currentArticleId, setCurrentArticleId] = useState<string | null>(null);
+  const [currentArticleId, setCurrentArticleId] = useSessionStorage<string | null>('geo_current_article_id', null);
   const [scraping, setScraping] = useState(false);
   const [rewriting, setRewriting] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
@@ -134,8 +134,10 @@ export function useWritingAssistant() {
     setRewriteResult(null);
     setGeoResult(null);
     setScraped(null);
+    setCurrentArticleId(null);
     sessionStorage.removeItem('geo_rewrite_result');
     sessionStorage.removeItem('geo_eval_result');
+    sessionStorage.removeItem('geo_current_article_id');
   };
 
   return {
