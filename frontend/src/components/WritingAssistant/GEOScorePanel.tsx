@@ -142,7 +142,9 @@ function SourceCitationCard({ citation }: { citation: SourceCitation }) {
 
 // ── ModelResult ──────────────────────────────────────────────────────────────
 
-function ModelResult({ result }: { result: GeoEvalResponse }) {
+function ModelResult({ result, isCombined }: { result: GeoEvalResponse; isCombined?: boolean }) {
+  const [responsesCollapsed, setResponsesCollapsed] = useState(false);
+
   if (result.error) {
     return (
       <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
@@ -154,6 +156,7 @@ function ModelResult({ result }: { result: GeoEvalResponse }) {
   const citedCount = result.source_citations.filter((c) => c.cited).length;
   const totalCount = result.source_citations.length;
   const hasCorpus = result.source_citations.some((c) => c.is_corpus);
+  const hasResponses = !isCombined && (result.ge_response_original || result.ge_response_optimized);
 
   return (
     <div className="space-y-6">
@@ -189,99 +192,57 @@ function ModelResult({ result }: { result: GeoEvalResponse }) {
       )}
 
       {/* 3. Competing Sources */}
-      <div>
-        <div className="flex items-baseline justify-between mb-3">
-          <SectionLabel>Competing Sources</SectionLabel>
-          <span className="text-xs text-gray-400 mb-3">
-            {citedCount} of {totalCount} cited &nbsp;&bull;&nbsp; {hasCorpus ? 'real corpus docs' : 'synthetic competitors'}
-          </span>
-        </div>
-        <div className="space-y-2.5">
-          {result.source_citations.map((c) => (
-            <SourceCitationCard key={c.source_id} citation={c} />
-          ))}
-        </div>
-      </div>
-
-
-    </div>
-  );
-}
-
-// ── AI Response Comparison (model-tabbed) ────────────────────────────────────
-
-function AIResponseTabs({ results }: { results: GeoEvalResponse[] }) {
-  const allEntries = results.filter((r) => !r.error);
-  const [activeModel, setActiveModel] = useState(allEntries[0]?.engine_model ?? '');
-  const [collapsed, setCollapsed] = useState(false);
-
-  if (allEntries.length === 0) return null;
-
-  const active = allEntries.find((r) => r.engine_model === activeModel) ?? allEntries[0];
-
-  return (
-    <div className="space-y-3">
-      <button
-        onClick={() => setCollapsed((v) => !v)}
-        className="flex items-center gap-2 group w-full"
-      >
-        <SectionLabel>AI Response Comparison</SectionLabel>
-        <span className="text-gray-400 group-hover:text-gray-600 transition-colors mb-3">
-          {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-        </span>
-      </button>
-
-      {!collapsed && (
+      {!isCombined && totalCount > 0 && (
         <>
-          {/* Model tabs */}
-          {allEntries.length > 1 && (
-            <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5 w-fit">
-              {allEntries.map((r) => {
-                const key = r.engine_model;
-                const isActive = key === (active?.engine_model ?? '');
-                return (
-                  <button
-                    key={key}
-                    onClick={() => setActiveModel(key)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
-                      isActive ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    {modelLabel(key)}
-                  </button>
-                );
-              })}
+          <div>
+            <div className="flex items-baseline justify-between mb-3">
+              <SectionLabel>Competing Sources</SectionLabel>
+              <span className="text-xs text-gray-400 mb-3">
+                {citedCount} of {totalCount} cited &nbsp;&bull;&nbsp; {hasCorpus ? 'real corpus docs' : 'synthetic competitors'}
+              </span>
             </div>
-          )}
+            <div className="space-y-2.5">
+              {result.source_citations.map((c) => (
+                <SourceCitationCard key={c.source_id} citation={c} />
+              ))}
+            </div>
+          </div>
+          <Divider />
+        </>
+      )}
 
-          {/* Side-by-side responses */}
-          {active && (
+      {/* 4. AI Response Comparison (inline, not for Combined) */}
+      {hasResponses && (
+        <div className="space-y-3">
+          <button
+            onClick={() => setResponsesCollapsed((v) => !v)}
+            className="flex items-center gap-2 group w-full"
+          >
+            <SectionLabel>AI Response Comparison</SectionLabel>
+            <span className="text-gray-400 group-hover:text-gray-600 transition-colors mb-3">
+              {responsesCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+            </span>
+          </button>
+
+          {!responsesCollapsed && (
             <div className="grid grid-cols-2 gap-4">
               <div className="rounded-lg border border-gray-200 overflow-hidden">
                 <div className="px-4 py-2 bg-gray-50 border-b border-gray-200">
                   <p className="text-xs font-semibold text-gray-600">Original Version</p>
-                  <p className="text-xs text-gray-400">
-                    {allEntries.length > 1
-                      ? `${modelLabel(active.engine_model)} — before optimization`
-                      : 'AI response before optimization'}
-                  </p>
+                  <p className="text-xs text-gray-400">AI response before optimization</p>
                 </div>
-                <MarkdownView content={active.ge_response_original} maxHeight="320px" className="border-0 rounded-none" />
+                <MarkdownView content={result.ge_response_original} maxHeight="320px" className="border-0 rounded-none" />
               </div>
               <div className="rounded-lg border border-gray-200 overflow-hidden">
                 <div className="px-4 py-2 bg-gray-50 border-b border-gray-200">
                   <p className="text-xs font-semibold text-gray-600">Optimized Version</p>
-                  <p className="text-xs text-gray-400">
-                    {allEntries.length > 1
-                      ? `${modelLabel(active.engine_model)} — after optimization`
-                      : 'AI response after optimization'}
-                  </p>
+                  <p className="text-xs text-gray-400">AI response after optimization</p>
                 </div>
-                <MarkdownView content={active.ge_response_optimized} maxHeight="320px" className="border-0 rounded-none" />
+                <MarkdownView content={result.ge_response_optimized} maxHeight="320px" className="border-0 rounded-none" />
               </div>
             </div>
           )}
-        </>
+        </div>
       )}
     </div>
   );
@@ -395,9 +356,7 @@ function SingleQueryPanel({ response, onReEvaluate, evaluating }: {
         evaluating={evaluating}
       />
       <ModelTabBar tabs={tabs} activeTab={activeTab} onSelect={setActiveTab} />
-      {activeResult && <ModelResult result={activeResult} />}
-      <Divider />
-      <AIResponseTabs results={response.results} />
+      {activeResult && <ModelResult result={activeResult} isCombined={activeTab === 'combined'} />}
     </div>
   );
 }
@@ -480,9 +439,7 @@ function BatchQueryPanel({ response, onReEvaluate, evaluating }: {
           </div>
           <div className="p-4 space-y-4">
             <ModelTabBar tabs={tabs} activeTab={resolvedTab} onSelect={setActiveTab} />
-            {activeResult && <ModelResult result={activeResult} />}
-            <Divider />
-            <AIResponseTabs results={selectedBqr.results} />
+            {activeResult && <ModelResult result={activeResult} isCombined={resolvedTab === 'combined'} />}
           </div>
         </div>
       )}

@@ -1,9 +1,16 @@
 import type { RuleSet } from '../../types';
+import { GE_MODELS } from '../../types';
 
 interface Props {
   selectedRuleSetIds: string[];
   onRuleSetIdsChange: (ids: string[]) => void;
   ruleSets: RuleSet[];
+}
+
+function fullModelName(model: string): string {
+  const found = GE_MODELS.find((m) => m.id === model);
+  if (found) return found.label;
+  return model;
 }
 
 export function ConfigPanel({
@@ -15,6 +22,12 @@ export function ConfigPanel({
         ? selectedRuleSetIds.filter((x) => x !== id)
         : [...selectedRuleSetIds, id]
     );
+  };
+
+  const allSelected = ruleSets.length > 0 && selectedRuleSetIds.length === ruleSets.length;
+
+  const handleToggleAll = () => {
+    onRuleSetIdsChange(allSelected ? [] : ruleSets.map((rs) => rs.id));
   };
 
   return (
@@ -31,12 +44,12 @@ export function ConfigPanel({
               </span>
             )}
           </label>
-          {selectedRuleSetIds.length > 0 && (
+          {ruleSets.length > 0 && (
             <button
-              onClick={() => onRuleSetIdsChange([])}
-              className="text-xs text-gray-400 hover:text-gray-600"
+              onClick={handleToggleAll}
+              className="text-xs text-primary-500 hover:text-primary-700 font-medium"
             >
-              Clear
+              {allSelected ? 'Deselect All' : 'Select All'}
             </button>
           )}
         </div>
@@ -63,7 +76,7 @@ export function ConfigPanel({
                     className="accent-primary-400"
                   />
                   <span className="flex-1 text-sm text-gray-700 truncate">{rs.name}</span>
-                  <span className="text-xs text-gray-400 shrink-0">{rs.engine_model.split('-').slice(0, 2).join(' ')}</span>
+                  <span className="text-xs text-gray-400 shrink-0">{fullModelName(rs.engine_model)}</span>
                 </label>
               );
             })}
