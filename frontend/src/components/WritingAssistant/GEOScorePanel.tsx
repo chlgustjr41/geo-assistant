@@ -201,29 +201,77 @@ function ModelResult({ result }: { result: GeoEvalResponse }) {
         </div>
       </div>
 
-      <Divider />
 
-      {/* 4. AI Response Comparison */}
-      <div>
-        <SectionLabel>AI Response Comparison</SectionLabel>
+    </div>
+  );
+}
+
+// ── AI Response Comparison (model-tabbed) ────────────────────────────────────
+
+function AIResponseTabs({ results, combined }: { results: GeoEvalResponse[]; combined?: GeoEvalResponse }) {
+  const allEntries = [
+    ...results.filter((r) => !r.error),
+    ...(combined && !combined.error ? [combined] : []),
+  ];
+
+  const [activeModel, setActiveModel] = useState(allEntries[0]?.engine_model ?? '');
+
+  if (allEntries.length === 0) return null;
+
+  const active = allEntries.find((r) => r.engine_model === activeModel) ?? allEntries[0];
+
+  return (
+    <div className="space-y-3">
+      <SectionLabel>AI Response Comparison</SectionLabel>
+
+      {/* Model tabs */}
+      {allEntries.length > 1 && (
+        <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5 w-fit">
+          {allEntries.map((r) => {
+            const key = r.engine_model;
+            const isActive = key === (active?.engine_model ?? '');
+            return (
+              <button
+                key={key}
+                onClick={() => setActiveModel(key)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                  isActive ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {modelLabel(key)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Side-by-side responses */}
+      {active && (
         <div className="grid grid-cols-2 gap-4">
           <div className="rounded-lg border border-gray-200 overflow-hidden">
             <div className="px-4 py-2 bg-gray-50 border-b border-gray-200">
               <p className="text-xs font-semibold text-gray-600">Original Version</p>
-              <p className="text-xs text-gray-400">AI response before optimization</p>
+              <p className="text-xs text-gray-400">
+                {allEntries.length > 1
+                  ? `${modelLabel(active.engine_model)} — before optimization`
+                  : 'AI response before optimization'}
+              </p>
             </div>
-            <MarkdownView content={result.ge_response_original} maxHeight="320px" className="border-0 rounded-none" />
+            <MarkdownView content={active.ge_response_original} maxHeight="320px" className="border-0 rounded-none" />
           </div>
           <div className="rounded-lg border border-gray-200 overflow-hidden">
             <div className="px-4 py-2 bg-gray-50 border-b border-gray-200">
               <p className="text-xs font-semibold text-gray-600">Optimized Version</p>
-              <p className="text-xs text-gray-400">AI response after optimization</p>
+              <p className="text-xs text-gray-400">
+                {allEntries.length > 1
+                  ? `${modelLabel(active.engine_model)} — after optimization`
+                  : 'AI response after optimization'}
+              </p>
             </div>
-            <MarkdownView content={result.ge_response_optimized} maxHeight="320px" className="border-0 rounded-none" />
+            <MarkdownView content={active.ge_response_optimized} maxHeight="320px" className="border-0 rounded-none" />
           </div>
         </div>
-      </div>
-
+      )}
     </div>
   );
 }
@@ -337,6 +385,8 @@ function SingleQueryPanel({ response, onReEvaluate, evaluating }: {
       />
       <ModelTabBar tabs={tabs} activeTab={activeTab} onSelect={setActiveTab} />
       {activeResult && <ModelResult result={activeResult} />}
+      <Divider />
+      <AIResponseTabs results={response.results} combined={response.combined} />
     </div>
   );
 }
@@ -420,6 +470,8 @@ function BatchQueryPanel({ response, onReEvaluate, evaluating }: {
           <div className="p-4 space-y-4">
             <ModelTabBar tabs={tabs} activeTab={resolvedTab} onSelect={setActiveTab} />
             {activeResult && <ModelResult result={activeResult} />}
+            <Divider />
+            <AIResponseTabs results={selectedBqr.results} combined={selectedBqr.combined} />
           </div>
         </div>
       )}
