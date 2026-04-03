@@ -202,4 +202,4 @@ export const GE_MODELS = [
 
 export type GEModelId = (typeof GE_MODELS)[number]['id'];
 
-export type Tab = 'writing' | 'rules' | 'settings';
+export type Tab = 'writing' | 'rules' | 'settings' | 'admin';

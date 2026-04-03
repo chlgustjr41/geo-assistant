@@ -1,24 +1,21 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { LogOut, RotateCcw } from "lucide-react";
 import { WritingAssistant } from "./WritingAssistant/WritingAssistant";
 import { RulesAndCorpus } from "./RulesAndCorpus/RulesAndCorpus";
 import { Settings } from "./Settings/Settings";
+import { Admin } from "./Admin/Admin";
 import { ToastContainer, toast } from "./shared/Toast";
 import { settingsApi } from "../services/api";
 import { useExtractionContext } from "../contexts/ExtractionContext";
 import { useAuth } from "../contexts/AuthContext";
 import type { Tab } from "../types";
 
+const SUPER_ADMIN_EMAIL = "chlgustjr41@gmail.com";
+
 interface TabDef {
   id: Tab;
   label: string;
 }
-
-const TABS: TabDef[] = [
-  { id: "writing", label: "Writing Assistant" },
-  { id: "rules", label: "Rules & Corpus" },
-  { id: "settings", label: "Settings" },
-];
 
 // localStorage keys used by the app (cleared on workspace reset)
 const LOCAL_STORAGE_KEYS = [
@@ -37,6 +34,17 @@ export function Layout() {
   const [resetting, setResetting] = useState(false);
   const { extracting } = useExtractionContext();
   const { user, signOut } = useAuth();
+  const isAdmin = user?.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
+
+  const tabs = useMemo<TabDef[]>(() => {
+    const base: TabDef[] = [
+      { id: "writing", label: "Writing Assistant" },
+      { id: "rules", label: "Rules & Corpus" },
+      { id: "settings", label: "Settings" },
+    ];
+    if (isAdmin) base.push({ id: "admin", label: "Admin" });
+    return base;
+  }, [isAdmin]);
 
   const handleResetWorkspace = async () => {
     if (!confirm(
@@ -73,7 +81,7 @@ export function Layout() {
               </p>
             </div>
             <nav className="flex flex-1">
-              {TABS.map((tab) => (
+              {tabs.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
@@ -126,6 +134,11 @@ export function Layout() {
         <div className={activeTab !== "settings" ? "hidden" : ""}>
           <Settings />
         </div>
+        {isAdmin && (
+          <div className={activeTab !== "admin" ? "hidden" : ""}>
+            <Admin />
+          </div>
+        )}
       </main>
 
       <ToastContainer />

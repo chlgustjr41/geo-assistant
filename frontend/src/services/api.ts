@@ -29,11 +29,15 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
-// On 401/403, sign the user out so they see the login page
+// On 401, sign the user out so they see the login page.
+// 403 on /api/admin/* is expected for non-admins — don't sign out.
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
-    if (error.response?.status === 401 || error.response?.status === 403) {
+    const status = error.response?.status;
+    const url: string = error.config?.url || '';
+    const isAdminRoute = url.includes('/api/admin/');
+    if (status === 401 || (status === 403 && !isAdminRoute)) {
       const { signOut } = await import('firebase/auth');
       await signOut(auth).catch(() => {});
     }
@@ -162,4 +166,13 @@ export const rulesApi = {
     api
       .post('/api/rules/export-training-package', data, { responseType: 'blob' })
       .then((r) => r.data),
+};
+
+export const adminApi = {
+  getWhitelist: () =>
+    api.get<{ emails: string[]; super_admin: string }>('/api/admin/whitelist').then((r) => r.data),
+  addEmail: (email: string) =>
+    api.post<{ ok: boolean; emails: string[]; already_exists?: boolean }>('/api/admin/whitelist', { email }).then((r) => r.data),
+  removeEmail: (email: string) =>
+    api.delete<{ ok: boolean; emails: string[]; error?: string }>('/api/admin/whitelist', { data: { email } }).then((r) => r.data),
 };

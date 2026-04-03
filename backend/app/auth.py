@@ -11,6 +11,9 @@ from firebase_admin import auth as firebase_auth, credentials
 
 from .config import get_firebase_service_account_path, get_allowed_emails, reload_env
 
+# ── Super-admin: hardcoded, cannot be removed via UI ──────────────────────
+SUPER_ADMIN_EMAIL = "chlgustjr41@gmail.com"
+
 _firebase_app = None
 
 
@@ -31,6 +34,10 @@ def _ensure_firebase() -> None:
 def _auth_enabled() -> bool:
     """Auth is enabled when ALLOWED_EMAILS is configured."""
     return bool(get_allowed_emails())
+
+
+def is_super_admin(email: str) -> bool:
+    return email.lower() == SUPER_ADMIN_EMAIL
 
 
 async def get_current_user(authorization: str = Header(default="")) -> dict | None:
@@ -63,3 +70,13 @@ async def get_current_user(authorization: str = Header(default="")) -> dict | No
         raise HTTPException(status_code=403, detail="Account not authorized")
 
     return decoded
+
+
+async def require_admin(user: dict | None = Depends(get_current_user)) -> dict:
+    """Dependency that requires the caller to be the super-admin."""
+    if user is None:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    email = (user.get("email") or "").lower()
+    if not is_super_admin(email):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
