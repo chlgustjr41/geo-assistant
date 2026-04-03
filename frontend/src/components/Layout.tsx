@@ -1,26 +1,25 @@
-import { useState } from 'react';
-import { WritingAssistant } from './WritingAssistant/WritingAssistant';
-import { TrendDiscovery } from './TrendDiscovery/TrendDiscovery';
-import { RuleTraining } from './RuleTraining/RuleTraining';
-import { Settings } from './Settings/Settings';
-import { ToastContainer } from './shared/Toast';
-import type { Tab } from '../types';
+import { useState } from "react";
+import { WritingAssistant } from "./WritingAssistant/WritingAssistant";
+import { RulesAndCorpus } from "./RulesAndCorpus/RulesAndCorpus";
+import { Settings } from "./Settings/Settings";
+import { ToastContainer } from "./shared/Toast";
+import { useExtractionContext } from "../contexts/ExtractionContext";
+import type { Tab } from "../types";
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'writing', label: 'Writing Assistant' },
-  { id: 'trends', label: 'Trends' },
-  { id: 'rules', label: 'Rules & Training' },
-  { id: 'settings', label: 'Settings' },
+interface TabDef {
+  id: Tab;
+  label: string;
+}
+
+const TABS: TabDef[] = [
+  { id: "writing", label: "Writing Assistant" },
+  { id: "rules", label: "Rules & Corpus" },
+  { id: "settings", label: "Settings" },
 ];
 
 export function Layout() {
-  const [activeTab, setActiveTab] = useState<Tab>('writing');
-  const [trendKeywords, setTrendKeywords] = useState<string[]>([]);
-
-  const handleSendKeywords = (keywords: string[]) => {
-    setTrendKeywords(keywords);
-    setActiveTab('writing');
-  };
+  const [activeTab, setActiveTab] = useState<Tab>("writing");
+  const { extracting } = useExtractionContext();
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -28,24 +27,29 @@ export function Layout() {
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex items-center gap-8">
             <div className="py-3 shrink-0">
-              <h1 className="text-base font-bold text-gray-900">CareYaya GEO Assistant</h1>
-              <p className="text-xs text-gray-400">Powered by AutoGEO &middot; ICLR 2026</p>
+              <h1 className="text-base font-bold text-gray-900">
+                GEO Assistant
+              </h1>
+              <p className="text-xs text-gray-400">
+                Powered by AutoGEO &middot; ICLR 2026
+              </p>
             </div>
             <nav className="flex">
               {TABS.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`px-5 py-4 text-sm font-medium border-b-2 transition-colors ${
+                  className={`flex items-center gap-1.5 px-5 py-4 text-sm font-medium border-b-2 transition-colors ${
                     activeTab === tab.id
-                      ? 'border-blue-600 text-blue-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300'
+                      ? "border-primary-600 text-primary-600"
+                      : "border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300"
                   }`}
                 >
                   {tab.label}
-                  {tab.id === 'writing' && trendKeywords.length > 0 && (
-                    <span className="ml-1.5 inline-flex items-center justify-center w-4 h-4 text-xs bg-green-500 text-white rounded-full">
-                      {trendKeywords.length}
+                  {tab.id === "rules" && extracting && (
+                    <span className="inline-flex h-2 w-2 relative">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-300 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-primary-400" />
                     </span>
                   )}
                 </button>
@@ -56,15 +60,15 @@ export function Layout() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-6">
-        {activeTab === 'writing' && (
-          <WritingAssistant
-            injectedKeywords={trendKeywords}
-            onClearKeywords={() => setTrendKeywords([])}
-          />
-        )}
-        {activeTab === 'trends' && <TrendDiscovery onSendKeywords={handleSendKeywords} />}
-        {activeTab === 'rules' && <RuleTraining />}
-        {activeTab === 'settings' && <Settings />}
+        <div className={activeTab !== "writing" ? "hidden" : ""}>
+          <WritingAssistant />
+        </div>
+        <div className={activeTab !== "rules" ? "hidden" : ""}>
+          <RulesAndCorpus />
+        </div>
+        <div className={activeTab !== "settings" ? "hidden" : ""}>
+          <Settings />
+        </div>
       </main>
 
       <ToastContainer />

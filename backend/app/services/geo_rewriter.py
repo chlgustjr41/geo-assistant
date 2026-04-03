@@ -28,6 +28,41 @@ Prompt structure (adapted from AutoGEO paper Section 3.2.1):
 from __future__ import annotations
 
 from . import llm_client
+from .llm_client import get_pipeline_model
+
+_MERGE_PROMPT = (
+    "You are merging multiple GEO (Generative Engine Optimization) rule sets into a single "
+    "unified set. Deduplicate redundant rules, resolve conflicts by keeping the more specific "
+    "rule, and output a clean numbered list of the merged rules.\n\n"
+    "Input rule sets:\n\n"
+    "{sections}\n\n"
+    "Output only the merged rules as a numbered list (e.g. '1. Rule text'), one per line. "
+    "Aim for 15–30 high-quality, actionable rules. No explanations, no headers."
+)
+
+
+async def merge_rules(rule_sets: list[tuple[str, list[str]]]) -> list[str]:
+    """LLM-merge multiple rule sets into one deduplicated list."""
+    sections = []
+    for name, rules in rule_sets:
+        numbered = "\n".join(f"  {i + 1}. {r}" for i, r in enumerate(rules))
+        sections.append(f"Rule Set — {name}:\n{numbered}")
+
+    prompt = _MERGE_PROMPT.format(sections="\n\n".join(sections))
+    raw = await llm_client.chat(get_pipeline_model(), prompt, max_tokens=2048)
+
+    merged: list[str] = []
+    for line in raw.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # Strip leading numbering like "1. " or "- "
+        if line[0].isdigit() and ". " in line:
+            line = line.split(". ", 1)[1]
+        elif line.startswith("- "):
+            line = line[2:]
+        merged.append(line)
+    return merged
 
 
 async def rewrite_article(

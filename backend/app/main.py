@@ -1,13 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .database import engine, Base
-from .routers import writing, trends, rules, settings as settings_router
+from .routers import writing, rules, settings as settings_router, corpus as corpus_router, query_sets as query_sets_router, corpus_sets as corpus_sets_router
 from .seed import seed_rule_sets
 
 # Create all tables
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="CareYaya GEO Assistant API", version="0.1.0")
+app = FastAPI(title="GEO Assistant API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -18,15 +18,43 @@ app.add_middleware(
 )
 
 app.include_router(writing.router)
-app.include_router(trends.router)
 app.include_router(rules.router)
 app.include_router(settings_router.router)
+app.include_router(corpus_router.router)
+app.include_router(query_sets_router.router)
+app.include_router(corpus_sets_router.router)
 
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    from .config import _set_env_file_permissions
+    from .config import _set_env_file_permissions, reload_env
+    from sqlalchemy import text
+    # Re-read .env now that all modules are initialized.  This is the
+    # authoritative load — any keys present in .env at startup time will
+    # be available to every request handler and service function.
+    reload_env()
     _set_env_file_permissions()
+
+    # Add new columns that didn't exist in earlier schema versions
+    with engine.connect() as conn:
+        for stmt in [
+            "ALTER TABLE rule_sets ADD COLUMN extraction_metadata_json TEXT",
+            "ALTER TABLE corpus_documents ADD COLUMN query_set_id VARCHAR",
+            "ALTER TABLE corpus_documents ADD COLUMN corpus_set_id VARCHAR",
+            "ALTER TABLE articles ADD COLUMN rule_set_ids_json TEXT",
+            """CREATE TABLE IF NOT EXISTS corpus_sets (
+                id VARCHAR PRIMARY KEY,
+                name VARCHAR NOT NULL,
+                query_set_id VARCHAR,
+                created_at DATETIME
+            )""",
+        ]:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                pass  # column already exists
+
     seed_rule_sets()
 
 

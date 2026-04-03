@@ -1,5 +1,10 @@
 import { Layout } from './components/Layout';
+import { ExtractionProvider } from './contexts/ExtractionContext';
 
 export default function App() {
-  return <Layout />;
+  return (
+    <ExtractionProvider>
+      <Layout />
+    </ExtractionProvider>
+  );
 }

@@ -14,12 +14,12 @@ export function ArticleInput({ onTextChange, onScrape, scraping, currentText }: 
   const [mode, setMode] = useState<'paste' | 'url'>('paste');
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-4">
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex gap-2 mb-3">
         <button
           onClick={() => setMode('paste')}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-            mode === 'paste' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'
+            mode === 'paste' ? 'bg-primary-100 text-primary-700' : 'text-gray-600 hover:bg-gray-100'
           }`}
         >
           <FileText size={14} /> Paste Text
@@ -27,7 +27,7 @@ export function ArticleInput({ onTextChange, onScrape, scraping, currentText }: 
         <button
           onClick={() => setMode('url')}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-            mode === 'url' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'
+            mode === 'url' ? 'bg-primary-100 text-primary-700' : 'text-gray-600 hover:bg-gray-100'
           }`}
         >
           <Link size={14} /> Scrape URL
@@ -41,12 +41,12 @@ export function ArticleInput({ onTextChange, onScrape, scraping, currentText }: 
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://careyaya.org/blog/..."
-            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
           <button
             onClick={() => onScrape(url)}
             disabled={scraping || !url.trim()}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-4 py-2 bg-primary-400 text-white rounded-lg text-sm font-medium hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {scraping ? <LoadingSpinner size="sm" /> : null}
             {scraping ? 'Scraping...' : 'Scrape'}
@@ -58,7 +58,7 @@ export function ArticleInput({ onTextChange, onScrape, scraping, currentText }: 
           onChange={(e) => onTextChange(e.target.value)}
           placeholder="Paste your article text here..."
           rows={8}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-mono"
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none font-mono"
         />
       )}
 

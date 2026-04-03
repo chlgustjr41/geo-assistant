@@ -6,7 +6,13 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 ENV_FILE = BASE_DIR / ".env"
 
-load_dotenv(ENV_FILE)
+load_dotenv(ENV_FILE, override=True)
+
+
+def reload_env() -> None:
+    """Re-read .env from disk into os.environ. Call this before checking key status."""
+    load_dotenv(ENV_FILE, override=True)
+
 
 # Known placeholder values that should be treated as "not configured"
 _PLACEHOLDERS = {"", "sk-...", "AI...", "sk-ant-..."}
@@ -35,10 +41,6 @@ def get_google_key() -> str:
 
 def get_anthropic_key() -> str:
     return os.getenv("ANTHROPIC_API_KEY", "")
-
-
-def get_target_website() -> str:
-    return os.getenv("TARGET_WEBSITE", "https://careyaya.org")
 
 
 def get_default_model() -> str:

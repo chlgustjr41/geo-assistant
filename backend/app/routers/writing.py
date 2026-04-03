@@ -1,10 +1,11 @@
 from __future__ import annotations
 import json
+import random
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..models import Article, RuleSet
+from ..models import Article, RuleSet, CorpusDocument, CorpusSet
 from ..services.article_scraper import scrape_url
 from ..services import geo_rewriter, geo_evaluator
 
@@ -28,19 +29,22 @@ class SaveArticleRequest(BaseModel):
     title: str = ""
     original_content: str
     rewritten_content: str | None = None
-    rule_set_id: str = ""
+    rule_set_id: str = ""        # legacy single-ID field (kept for compat)
+    rule_set_ids: list[str] = [] # all selected rule set IDs
     model_used: str = ""
     trend_keywords: list[str] = []
 
 
 @router.post("/save")
 def save_article(body: SaveArticleRequest, db: Session = Depends(get_db)):
+    all_ids = body.rule_set_ids or ([body.rule_set_id] if body.rule_set_id else [])
     article = Article(
         source_url=body.source_url,
         title=body.title,
         original_content=body.original_content,
         rewritten_content=body.rewritten_content,
-        rule_set_id=body.rule_set_id,
+        rule_set_id=all_ids[0] if all_ids else "",
+        rule_set_ids_json=json.dumps(all_ids) if all_ids else None,
         model_used=body.model_used,
         trend_keywords_json=json.dumps(body.trend_keywords) if body.trend_keywords else None,
     )
@@ -50,39 +54,171 @@ def save_article(body: SaveArticleRequest, db: Session = Depends(get_db)):
     return {"id": article.id, "created_at": article.created_at.isoformat()}
 
 
+@router.delete("/history/{article_id}")
+def delete_article(article_id: str, db: Session = Depends(get_db)):
+    article = db.query(Article).filter(Article.id == article_id).first()
+    if not article:
+        raise HTTPException(404, "Article not found")
+    db.delete(article)
+    db.commit()
+    return {"ok": True}
+
+
+class SaveScoresRequest(BaseModel):
+    geo_scores_json: str  # serialized MultiGeoEvalResponse
+
+
+@router.patch("/history/{article_id}/scores")
+def save_article_scores(article_id: str, body: SaveScoresRequest, db: Session = Depends(get_db)):
+    article = db.query(Article).filter(Article.id == article_id).first()
+    if not article:
+        raise HTTPException(404, "Article not found")
+    article.geo_scores_json = body.geo_scores_json
+    db.commit()
+    return {"ok": True}
+
+
+def _resolve_rule_set_ids(article: Article) -> list[str]:
+    """Return all rule set IDs stored for an article (new multi or legacy single)."""
+    if article.rule_set_ids_json:
+        try:
+            ids = json.loads(article.rule_set_ids_json)
+            if isinstance(ids, list) and ids:
+                return ids
+        except Exception:
+            pass
+    return [article.rule_set_id] if article.rule_set_id else []
+
+
+def _rule_sets_payload(rule_set_ids: list[str], rule_sets_map: dict) -> list[dict]:
+    """Return a list of {id, name, engine_model} for each ID found in the map."""
+    return [
+        {"id": rs.id, "name": rs.name, "engine_model": rs.engine_model}
+        for rid in rule_set_ids
+        if (rs := rule_sets_map.get(rid))
+    ]
+
+
+@router.get("/history/{article_id}")
+def get_history_item(article_id: str, db: Session = Depends(get_db)):
+    article = db.query(Article).filter(Article.id == article_id).first()
+    if not article:
+        raise HTTPException(404, "Article not found")
+    rule_sets_map = {rs.id: rs for rs in db.query(RuleSet).all()}
+    rs_ids = _resolve_rule_set_ids(article)
+    rs_list = _rule_sets_payload(rs_ids, rule_sets_map)
+    primary_rs = rule_sets_map.get(article.rule_set_id) if article.rule_set_id else None
+    corpus_sets = {cs.id: cs.name for cs in db.query(CorpusSet).all()}
+    corpus_set_names: list[str] = []
+    for rid in rs_ids:
+        rs = rule_sets_map.get(rid)
+        if rs and rs.extraction_metadata_json:
+            try:
+                meta = json.loads(rs.extraction_metadata_json)
+                for cid in meta.get("corpus_set_ids", []):
+                    name = corpus_sets.get(cid)
+                    if name and name not in corpus_set_names:
+                        corpus_set_names.append(name)
+            except Exception:
+                pass
+    return {
+        "id": article.id,
+        "title": article.title,
+        "source_url": article.source_url,
+        "original_content": article.original_content,
+        "rewritten_content": article.rewritten_content,
+        "geo_scores": json.loads(article.geo_scores_json) if article.geo_scores_json else None,
+        "rule_set_id": article.rule_set_id,
+        "rule_set_name": primary_rs.name if primary_rs else None,
+        "rule_sets": rs_list,
+        "corpus_set_names": corpus_set_names,
+        "model_used": article.model_used,
+        "trend_keywords": json.loads(article.trend_keywords_json) if article.trend_keywords_json else [],
+        "created_at": article.created_at.isoformat(),
+    }
+
+
 @router.get("/history")
 def get_history(db: Session = Depends(get_db)):
     articles = db.query(Article).order_by(Article.created_at.desc()).limit(50).all()
-    return [
-        {
+    # Pre-load rule sets and corpus sets to avoid N+1 queries
+    rule_sets_map = {rs.id: rs for rs in db.query(RuleSet).all()}
+    corpus_sets = {cs.id: cs.name for cs in db.query(CorpusSet).all()}
+
+    rows = []
+    for a in articles:
+        rs_ids = _resolve_rule_set_ids(a)
+        rs_list = _rule_sets_payload(rs_ids, rule_sets_map)
+        primary_rs = rule_sets_map.get(a.rule_set_id) if a.rule_set_id else None
+        # Corpus set names across all rule sets
+        corpus_set_names: list[str] = []
+        for rid in rs_ids:
+            rs = rule_sets_map.get(rid)
+            if rs and rs.extraction_metadata_json:
+                try:
+                    meta = json.loads(rs.extraction_metadata_json)
+                    for cid in meta.get("corpus_set_ids", []):
+                        name = corpus_sets.get(cid)
+                        if name and name not in corpus_set_names:
+                            corpus_set_names.append(name)
+                except Exception:
+                    pass
+        # Corpus doc count from saved eval scores (only present after evaluation)
+        corpus_doc_count: int | None = None
+        corpus_used: bool | None = None
+        if a.geo_scores_json:
+            try:
+                sc = json.loads(a.geo_scores_json)
+                corpus_used = sc.get("corpus_used")
+                corpus_doc_count = sc.get("corpus_doc_count")
+            except Exception:
+                pass
+        rows.append({
             "id": a.id,
             "title": a.title,
             "source_url": a.source_url,
             "model_used": a.model_used,
             "rule_set_id": a.rule_set_id,
+            "rule_set_name": primary_rs.name if primary_rs else None,
+            "rule_sets": rs_list,
+            "corpus_set_names": corpus_set_names,
+            "corpus_used": corpus_used,
+            "corpus_doc_count": corpus_doc_count,
             "has_rewrite": a.rewritten_content is not None,
             "has_scores": a.geo_scores_json is not None,
             "created_at": a.created_at.isoformat(),
-        }
-        for a in articles
-    ]
+        })
+    return rows
 
 
 class RewriteRequest(BaseModel):
     content: str
     model: str
-    rule_set_id: str
+    rule_set_ids: list[str]
     trend_keywords: list[str] = []
 
 
 @router.post("/rewrite")
 async def rewrite_article(body: RewriteRequest, db: Session = Depends(get_db)):
-    rule_set = db.query(RuleSet).filter(RuleSet.id == body.rule_set_id).first()
-    if rule_set is None:
-        raise HTTPException(404, f"Rule set '{body.rule_set_id}' not found")
+    if not body.rule_set_ids:
+        raise HTTPException(400, "At least one rule set ID is required")
 
-    rules_data = json.loads(rule_set.rules_json)
-    filtered_rules: list[str] = rules_data.get("filtered_rules", [])
+    loaded: list[tuple[str, list[str]]] = []
+    for rsid in body.rule_set_ids:
+        rs = db.query(RuleSet).filter(RuleSet.id == rsid).first()
+        if rs is None:
+            raise HTTPException(404, f"Rule set '{rsid}' not found")
+        rules_data = json.loads(rs.rules_json)
+        loaded.append((rs.name, rules_data.get("filtered_rules", [])))
+
+    if len(loaded) == 1:
+        filtered_rules = loaded[0][1]
+    else:
+        # Merge multiple rule sets via LLM before rewriting
+        try:
+            filtered_rules = await geo_rewriter.merge_rules(loaded)
+        except Exception as e:
+            raise HTTPException(400, f"Rule merge failed: {str(e)}")
 
     try:
         rewritten = await geo_rewriter.rewrite_article(
@@ -100,6 +236,7 @@ async def rewrite_article(body: RewriteRequest, db: Session = Depends(get_db)):
         "model_used": body.model,
         "rules_applied": filtered_rules,
         "trend_keywords_injected": body.trend_keywords,
+        "rule_set_ids": body.rule_set_ids,
     }
 
 
@@ -107,46 +244,82 @@ class EvaluateGeoRequest(BaseModel):
     original_content: str
     rewritten_content: str
     test_query: str | None = None
-    engine_model: str
     num_competing_docs: int = 4
+    rules_applied: list[str] = []
+    rule_set_ids: list[str] = []
+    batch_mode: bool = False
+    batch_query_count: int | None = None  # if set, randomly sample this many from the query set
 
 
 @router.post("/evaluate-geo")
-async def evaluate_geo(body: EvaluateGeoRequest):
+async def evaluate_geo(body: EvaluateGeoRequest, db: Session = Depends(get_db)):
+    # Resolve corpus from rule set extraction metadata (same docs used during extraction)
+    corpus_set_ids: list[str] = []
+    engine_models: list[str] = []
+    for rsid in body.rule_set_ids:
+        rs = db.query(RuleSet).filter(RuleSet.id == rsid).first()
+        if rs:
+            if rs.engine_model:
+                engine_models.append(rs.engine_model)
+            if rs.extraction_metadata_json:
+                meta = json.loads(rs.extraction_metadata_json)
+                corpus_set_ids.extend(meta.get("corpus_set_ids", []))
+    corpus_set_ids = list(dict.fromkeys(corpus_set_ids))  # deduplicate, preserve order
+
+    q = db.query(CorpusDocument)
+    if corpus_set_ids:
+        q = q.filter(CorpusDocument.corpus_set_id.in_(corpus_set_ids))
+    corpus_rows = q.order_by(CorpusDocument.created_at.desc()).limit(200).all()
+    corpus_docs = [row.content for row in corpus_rows]
+    corpus_doc_metadata = [{"source_url": row.source_url} for row in corpus_rows]
+
+    # Collect queries for batch mode
+    batch_queries: list[str] | None = None
+    if body.batch_mode:
+        query_set_ids: list[str] = []
+        for rsid in body.rule_set_ids:
+            rs = db.query(RuleSet).filter(RuleSet.id == rsid).first()
+            if rs and rs.extraction_metadata_json:
+                meta = json.loads(rs.extraction_metadata_json)
+                if meta.get("query_set_id"):
+                    query_set_ids.append(meta["query_set_id"])
+        query_set_ids = list(dict.fromkeys(query_set_ids))
+        if query_set_ids:
+            from ..models import QuerySet as QuerySetModel
+            all_queries: list[str] = []
+            for qsid in query_set_ids:
+                qs = db.query(QuerySetModel).filter(QuerySetModel.id == qsid).first()
+                if qs:
+                    try:
+                        all_queries.extend(json.loads(qs.queries_json))
+                    except Exception:
+                        pass
+            # Deduplicate preserving order
+            seen: set[str] = set()
+            deduped: list[str] = []
+            for q_str in all_queries:
+                if q_str not in seen:
+                    seen.add(q_str)
+                    deduped.append(q_str)
+            if deduped:
+                if body.batch_query_count and 0 < body.batch_query_count < len(deduped):
+                    batch_queries = random.sample(deduped, body.batch_query_count)
+                else:
+                    batch_queries = deduped[:30]  # default cap
+
     try:
-        result = await geo_evaluator.evaluate_geo(
+        result = await geo_evaluator.evaluate_geo_multi(
             original_content=body.original_content,
             rewritten_content=body.rewritten_content,
-            engine_model=body.engine_model,
             test_query=body.test_query,
             num_competing_docs=body.num_competing_docs,
+            rules_applied=body.rules_applied,
+            corpus_docs=corpus_docs,
+            corpus_doc_metadata=corpus_doc_metadata,
+            engine_models=engine_models,
+            queries=batch_queries,
         )
     except Exception as e:
         raise HTTPException(400, f"GEO evaluation failed: {str(e)}")
 
-    return {
-        "original_scores": {
-            "word": result.original_scores.word,
-            "pos": result.original_scores.pos,
-            "overall": result.original_scores.overall,
-        },
-        "optimized_scores": {
-            "word": result.optimized_scores.word,
-            "pos": result.optimized_scores.pos,
-            "overall": result.optimized_scores.overall,
-        },
-        "improvement": result.improvement,
-        "ge_response_original": result.ge_response_original,
-        "ge_response_optimized": result.ge_response_optimized,
-        "source_citations": [
-            {
-                "source_id": c.source_id,
-                "label": c.label,
-                "word_score": c.word_score,
-                "cited": c.cited,
-            }
-            for c in result.source_citations
-        ],
-        "test_query_used": result.test_query_used,
-        "evaluation_cost_usd": result.evaluation_cost_usd,
-    }
+    return result

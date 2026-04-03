@@ -3,54 +3,48 @@ AutoGEO 4-stage rule extraction pipeline.
 Stages: Explainer -> Extractor -> Merger -> Filter
 
 Adapted from Wu et al. ICLR 2026 (AutoGEO).
-Uses LLM-generated synthetic documents since ClueWeb22 is unavailable locally.
+
+Paper design: BM25 retrieves top-K real documents from ClueWeb22 per query.
+This implementation uses the user's built corpus as the ClueWeb22 substitute —
+real web articles scraped via Build Corpus, retrieved by BM25 per query.
+Corpus must be built before extraction (same corpus is reused in GEO evaluation).
 """
 from __future__ import annotations
 import asyncio
-import json
-import random
 from pathlib import Path
-from typing import AsyncGenerator, Callable
+from typing import Callable
+from rank_bm25 import BM25Okapi
 from . import llm_client
-from .llm_client import PIPELINE_BASE_MODEL
+from .llm_client import get_pipeline_model
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "autogeo" / "prompts"
+MIN_CORPUS_DOCS = 5
+RETRIEVAL_TOP_K = 5
+
 
 def _load_prompt(name: str) -> str:
     return (PROMPTS_DIR / f"{name}.txt").read_text(encoding="utf-8")
 
 
-# -- Synthetic document generation ------------------------------------------
+# ---------------------------------------------------------------------------
+# BM25 retrieval — paper Section 3.1
+# ---------------------------------------------------------------------------
 
-DOC_QUALITY_PROMPTS = [
-    # Doc 1: High quality -- comprehensive, statistics-rich
-    "Write a comprehensive 400-word healthcare article answering: \"{query}\". Include specific statistics from CDC/NIH/AARP, use question-style subheadings, provide concrete actionable steps, cite named programs and costs. High E-E-A-T signals.",
-    # Doc 2: Good -- moderate quality, some citations
-    "Write a 300-word informative article answering: \"{query}\". Include a few statistics, use clear structure, provide some practical guidance. Decent but not exceptional quality.",
-    # Doc 3: Average -- generic, thin content
-    "Write a 200-word generic article about: \"{query}\". Use general advice without specifics. No statistics, vague recommendations, minimal structure.",
-    # Doc 4: Off-topic / tangential
-    "Write a 200-word article that is loosely related to but doesn't directly answer: \"{query}\". Drift to related topics, provide only tangential information.",
-    # Doc 5: Keyword-stuffed -- low substance
-    "Write a 200-word article that overuses keywords related to \"{query}\" but provides very little actual useful information. Keyword density is high but content is thin.",
-]
+def bm25_retrieve(query: str, corpus_docs: list[str], top_k: int = RETRIEVAL_TOP_K) -> list[str]:
+    """BM25-retrieve top_k corpus documents for a query (paper's ClueWeb22 retrieval step)."""
+    tokenized = [doc.lower().split() for doc in corpus_docs]
+    bm25 = BM25Okapi(tokenized)
+    scores = bm25.get_scores(query.lower().split())
+    top_indices = sorted(range(len(corpus_docs)), key=lambda i: scores[i], reverse=True)[:top_k]
+    return [corpus_docs[i] for i in top_indices]
 
 
-async def _generate_doc(query: str, quality_prompt: str) -> str:
-    prompt = quality_prompt.format(query=query)
-    return await llm_client.chat(PIPELINE_BASE_MODEL, prompt, max_tokens=1024)
-
-
-async def _generate_docs_for_query(query: str) -> list[str]:
-    """Generate 5 synthetic documents of varying quality for a query."""
-    tasks = [_generate_doc(query, p) for p in DOC_QUALITY_PROMPTS]
-    return await asyncio.gather(*tasks)
-
-
-# -- GE simulation & visibility scoring -------------------------------------
+# ---------------------------------------------------------------------------
+# GE simulation — paper Section 3.2
+# ---------------------------------------------------------------------------
 
 async def _simulate_ge(query: str, docs: list[str], model: str) -> str:
-    """Simulate a generative engine response citing [Source N]."""
+    """Simulate a generative engine response citing retrieved sources."""
     sources_text = "\n\n".join(
         f"[Source {i+1}]: {doc[:1500]}" for i, doc in enumerate(docs)
     )
@@ -67,34 +61,36 @@ Synthesize information across sources where appropriate."""
     return await llm_client.chat(model, prompt, max_tokens=1024)
 
 
+# ---------------------------------------------------------------------------
+# Visibility scoring & contrast pair selection — paper Equations 1–2
+# ---------------------------------------------------------------------------
+
 def _word_visibility(doc_idx: int, ge_response: str) -> float:
-    """Calculate Word visibility score for source (doc_idx+1) in GE response."""
     source_tag = f"[Source {doc_idx + 1}]"
     sentences = ge_response.split(". ")
     total_words = len(ge_response.split())
     if total_words == 0:
         return 0.0
-    cited_words = sum(
-        len(s.split()) for s in sentences if source_tag in s
-    )
+    cited_words = sum(len(s.split()) for s in sentences if source_tag in s)
     return (cited_words / total_words) * 100
 
 
 def _select_contrast_pair(docs: list[str], ge_response: str) -> tuple[str, str]:
-    """Select the highest-contrast (best vs worst) visibility pair (AutoGEO Eq. 2)."""
+    """Select highest-contrast (best vs worst visibility) pair — paper Equation 2."""
     scores = [_word_visibility(i, ge_response) for i in range(len(docs))]
     best_idx = max(range(len(scores)), key=lambda i: scores[i])
     worst_idx = min(range(len(scores)), key=lambda i: scores[i])
     return docs[best_idx], docs[worst_idx]
 
 
-# -- 4-Stage Pipeline -------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 4-Stage Pipeline — paper Section 3.3
+# ---------------------------------------------------------------------------
 
 async def _stage_explainer(
-    pairs: list[tuple[str, str, str]],  # (query, high_doc, low_doc)
+    pairs: list[tuple[str, str, str]],
     progress_cb: Callable[[str, int, int], None],
 ) -> list[str]:
-    """Stage 1: For each pair, explain why high_doc outperforms low_doc."""
     explainer_prompt = _load_prompt("explainer")
     explanations = []
     for i, (query, high_doc, low_doc) in enumerate(pairs):
@@ -108,7 +104,7 @@ HIGH-VISIBILITY DOCUMENT:
 
 LOW-VISIBILITY DOCUMENT:
 {low_doc[:2000]}"""
-        explanation = await llm_client.chat(PIPELINE_BASE_MODEL, prompt, max_tokens=512)
+        explanation = await llm_client.chat(get_pipeline_model(), prompt, max_tokens=2048)
         explanations.append(explanation)
     return explanations
 
@@ -117,7 +113,6 @@ async def _stage_extractor(
     explanations: list[str],
     progress_cb: Callable[[str, int, int], None],
 ) -> list[str]:
-    """Stage 2: Distill each explanation into 3-5 concise rules."""
     extractor_prompt = _load_prompt("extractor")
     all_rules = []
     for i, explanation in enumerate(explanations):
@@ -126,7 +121,7 @@ async def _stage_extractor(
 
 OBSERVATIONS:
 {explanation}"""
-        raw_rules = await llm_client.chat(PIPELINE_BASE_MODEL, prompt, max_tokens=512)
+        raw_rules = await llm_client.chat(get_pipeline_model(), prompt, max_tokens=1024)
         for line in raw_rules.split("\n"):
             line = line.strip().lstrip("0123456789.). ").strip()
             if line and len(line) > 10:
@@ -139,10 +134,8 @@ async def _stage_merger(
     progress_cb: Callable[[str, int, int], None],
     chunk_size: int = 50,
 ) -> list[str]:
-    """Stage 3: Hierarchically merge rules into non-redundant set."""
     merger_prompt = _load_prompt("merger")
-
-    chunks = [rules[i:i+chunk_size] for i in range(0, len(rules), chunk_size)]
+    chunks = [rules[i:i + chunk_size] for i in range(0, len(rules), chunk_size)]
     merged_chunks = []
 
     for i, chunk in enumerate(chunks):
@@ -152,7 +145,7 @@ async def _stage_merger(
 
 CANDIDATE RULES:
 {numbered}"""
-        merged = await llm_client.chat(PIPELINE_BASE_MODEL, prompt, max_tokens=1024)
+        merged = await llm_client.chat(get_pipeline_model(), prompt, max_tokens=2048)
         for line in merged.split("\n"):
             line = line.strip().lstrip("0123456789.). ").strip()
             if line and len(line) > 10:
@@ -165,7 +158,7 @@ CANDIDATE RULES:
 
 CANDIDATE RULES:
 {numbered}"""
-        final = await llm_client.chat(PIPELINE_BASE_MODEL, prompt, max_tokens=1024)
+        final = await llm_client.chat(get_pipeline_model(), prompt, max_tokens=1024)
         result = []
         for line in final.split("\n"):
             line = line.strip().lstrip("0123456789.). ").strip()
@@ -180,7 +173,6 @@ async def _stage_filter(
     rules: list[str],
     progress_cb: Callable[[str, int, int], None],
 ) -> list[str]:
-    """Stage 4: Remove ambiguous or non-actionable rules."""
     filter_prompt = _load_prompt("filter")
     progress_cb("filter", 1, 1)
     numbered = "\n".join(f"{i+1}. {r}" for i, r in enumerate(rules))
@@ -188,7 +180,7 @@ async def _stage_filter(
 
 RULES TO FILTER:
 {numbered}"""
-    filtered = await llm_client.chat(PIPELINE_BASE_MODEL, prompt, max_tokens=1024)
+    filtered = await llm_client.chat(get_pipeline_model(), prompt, max_tokens=2048)
     result = []
     for line in filtered.split("\n"):
         line = line.strip().lstrip("0123456789.). ").strip()
@@ -197,45 +189,52 @@ RULES TO FILTER:
     return result
 
 
-# -- Main extraction entry point --------------------------------------------
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
 
 async def extract_rules_stream(
     queries: list[str],
     engine_model: str,
     rule_set_name: str,
     progress_callback: Callable[[dict], None],
-) -> list[str]:
+    corpus_docs: list[str],
+) -> tuple[list[str], list[dict]]:
     """
-    Run the full 4-stage AutoGEO rule extraction pipeline.
+    Run the full AutoGEO rule extraction pipeline.
 
-    engine_model: the GE model to simulate (what you're optimising for — e.g. GPT-4o, Gemini).
-                  Only used in _simulate_ge(); all pipeline stages use PIPELINE_BASE_MODEL.
-
-    Calls progress_callback with dicts like:
-      {"stage": "generating_docs", "completed": 3, "total": 20}
-      {"stage": "explainer",       "completed": 5, "total": 20}
-      {"stage": "extractor",       "completed": 10, "total": 20}
-      {"stage": "merger",          "completed": 1,  "total": 2}
-      {"stage": "filter",          "completed": 1,  "total": 1}
-
-    Returns the final filtered_rules list.
+    corpus_docs: real document texts (user's local ClueWeb22 substitute).
+                 Requires >= MIN_CORPUS_DOCS entries.
+    engine_model: GE model to simulate (only used in _simulate_ge;
+                  all 4 pipeline stages use get_pipeline_model()).
+    Returns (filtered_rules, ge_responses_log).
     """
+    if len(corpus_docs) < MIN_CORPUS_DOCS:
+        raise ValueError(
+            f"Corpus has only {len(corpus_docs)} document(s). "
+            f"At least {MIN_CORPUS_DOCS} are required. "
+            "Add more documents in the Build Corpus tab."
+        )
+
     def _cb(stage: str, completed: int, total: int) -> None:
         progress_callback({"stage": stage, "completed": completed, "total": total})
 
-    # Phase A: Generate synthetic docs (Claude) + GE simulation (target engine_model)
+    # Phase A — BM25 retrieval + GE simulation + contrast pair selection
     pairs: list[tuple[str, str, str]] = []
+    ge_responses_log: list[dict] = []
+
     for i, query in enumerate(queries):
-        progress_callback({"stage": "generating_docs", "completed": i + 1, "total": len(queries)})
-        docs = await _generate_docs_for_query(query)          # uses PIPELINE_BASE_MODEL
-        ge_response = await _simulate_ge(query, docs, engine_model)  # uses target engine
-        high_doc, low_doc = _select_contrast_pair(docs, ge_response)
+        progress_callback({"stage": "bm25_retrieval", "completed": i + 1, "total": len(queries)})
+        retrieved = bm25_retrieve(query, corpus_docs, top_k=RETRIEVAL_TOP_K)
+        ge_response = await _simulate_ge(query, retrieved, engine_model)
+        ge_responses_log.append({"query": query, "response": ge_response})
+        high_doc, low_doc = _select_contrast_pair(retrieved, ge_response)
         pairs.append((query, high_doc, low_doc))
 
-    # All four pipeline stages use PIPELINE_BASE_MODEL (Claude Sonnet)
+    # Phase B — 4-stage pipeline
     explanations = await _stage_explainer(pairs, _cb)
     raw_rules = await _stage_extractor(explanations, _cb)
     merged_rules = await _stage_merger(raw_rules, _cb)
     filtered_rules = await _stage_filter(merged_rules, _cb)
 
-    return filtered_rules
+    return filtered_rules, ge_responses_log

@@ -2,7 +2,7 @@
 from __future__ import annotations
 import asyncio
 from . import llm_client
-from .llm_client import PIPELINE_BASE_MODEL
+from .llm_client import get_pipeline_model
 
 _SYNTHETIC_DOC_PROMPT = (
     "Generate a realistic blog post excerpt (150-250 words) about the following topic "
@@ -24,14 +24,16 @@ _DOC_STYLES = [
 async def generate_synthetic_competitors(
     query: str,
     num_docs: int,
-    model: str = PIPELINE_BASE_MODEL,
+    model: str | None = None,
 ) -> list[str]:
-    """Generate synthetic competing documents for a given query using the pipeline base model."""
+    """Generate synthetic competing documents for a given query using the pipeline model."""
+    if model is None:
+        model = get_pipeline_model()
     tasks = [
         llm_client.chat(
-            PIPELINE_BASE_MODEL,
+            model,
             _SYNTHETIC_DOC_PROMPT.format(query=query, style=_DOC_STYLES[i % len(_DOC_STYLES)]),
-            max_tokens=512,
+            max_tokens=1024,
         )
         for i in range(num_docs)
     ]

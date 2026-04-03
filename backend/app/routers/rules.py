@@ -1,16 +1,16 @@
 from __future__ import annotations
 import asyncio
-import io
 import json
+import logging
 import uuid as uuid_module
-import zipfile
-import yaml
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 from ..database import get_db
-from ..models import RuleSet
+from ..models import RuleSet, CorpusDocument, CorpusSet, QuerySet
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/rules", tags=["rules"])
 
@@ -18,8 +18,25 @@ router = APIRouter(prefix="/api/rules", tags=["rules"])
 @router.get("")
 def list_rule_sets(db: Session = Depends(get_db)):
     rule_sets = db.query(RuleSet).order_by(RuleSet.created_at).all()
-    return [
-        {
+    existing_cs_ids = {row.id for row in db.query(CorpusSet.id).all()}
+    existing_qs_ids = {row.id for row in db.query(QuerySet.id).all()}
+    result = []
+    for rs in rule_sets:
+        is_deprecated = False
+        if rs.extraction_metadata_json:
+            try:
+                meta = json.loads(rs.extraction_metadata_json)
+                # Deprecated if any referenced corpus set is gone
+                corpus_set_ids = meta.get("corpus_set_ids") or []
+                if corpus_set_ids and any(cid not in existing_cs_ids for cid in corpus_set_ids):
+                    is_deprecated = True
+                # Deprecated if the query set it was built from is gone
+                qs_id = meta.get("query_set_id")
+                if qs_id and qs_id not in existing_qs_ids:
+                    is_deprecated = True
+            except Exception:
+                pass
+        result.append({
             "id": rs.id,
             "name": rs.name,
             "engine_model": rs.engine_model,
@@ -27,9 +44,9 @@ def list_rule_sets(db: Session = Depends(get_db)):
             "num_rules": rs.num_rules,
             "is_builtin": rs.is_builtin,
             "created_at": rs.created_at.isoformat(),
-        }
-        for rs in rule_sets
-    ]
+            "is_deprecated": is_deprecated,
+        })
+    return result
 
 
 @router.get("/{rule_set_id}")
@@ -46,6 +63,7 @@ def get_rule_set(rule_set_id: str, db: Session = Depends(get_db)):
         "num_rules": rs.num_rules,
         "is_builtin": rs.is_builtin,
         "created_at": rs.created_at.isoformat(),
+        "extraction_metadata": json.loads(rs.extraction_metadata_json) if rs.extraction_metadata_json else None,
     }
 
 
@@ -127,47 +145,151 @@ def create_rule_set(body: CreateRuleSetRequest, db: Session = Depends(get_db)):
 # ── New Phase 5 endpoints ───────────────────────────────────────────────────
 
 class GenerateQueriesRequest(BaseModel):
-    topic: str
+    topic: str = ""
     num_queries: int = 20
+    article_content: str | None = None  # when provided, queries are grounded in the article
 
 
 @router.post("/generate-queries")
 async def generate_queries_endpoint(body: GenerateQueriesRequest):
-    from ..services.query_generator import generate_queries
-    queries = await generate_queries(body.topic, body.num_queries)
-    return {"queries": queries}
+    from ..services.query_generator import generate_queries, generate_queries_from_article
+    try:
+        if body.article_content and body.article_content.strip():
+            queries, suggested_topic = await generate_queries_from_article(
+                body.article_content.strip(), body.num_queries
+            )
+            return {"queries": queries, "suggested_topic": suggested_topic}
+        else:
+            if not body.topic.strip():
+                raise HTTPException(400, "Provide either a topic or article_content")
+            queries, suggested_name = await generate_queries(body.topic.strip(), body.num_queries)
+            return {"queries": queries, "suggested_topic": suggested_name}
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.exception("Query generation failed")
+        raise HTTPException(500, str(e))
 
 
 class ExtractRulesRequest(BaseModel):
     queries: list[str]
-    engine_model: str = "gemini-2.5-flash-lite"
+    engine_models: list[str]
     rule_set_name: str
+    query_set_id: str                # used to auto-select matching corpus sets
+    corpus_set_ids: list[str] = []   # explicit override; empty = use corpus sets linked to query_set_id
 
 
 @router.post("/extract")
 async def extract_rules_endpoint(body: ExtractRulesRequest, db: Session = Depends(get_db)):
-    from ..services.rule_extractor import extract_rules_stream
+    from ..services.rule_extractor import extract_rules_stream, MIN_CORPUS_DOCS
+    from ..database import SessionLocal
+    from ..models import CorpusSet
 
-    async def event_generator_v2():
+    if not body.engine_models:
+        raise HTTPException(400, "At least one engine model is required")
+
+    # Resolve which corpus sets to use:
+    # explicit override > corpus sets linked to this query set > all corpus docs
+    if body.corpus_set_ids:
+        resolved_set_ids = body.corpus_set_ids
+    else:
+        linked = (
+            db.query(CorpusSet)
+            .filter(CorpusSet.query_set_id == body.query_set_id)
+            .all()
+        )
+        resolved_set_ids = [cs.id for cs in linked]
+
+    # Fetch corpus documents
+    q = db.query(CorpusDocument)
+    if resolved_set_ids:
+        q = q.filter(CorpusDocument.corpus_set_id.in_(resolved_set_ids))
+    corpus_rows = q.order_by(CorpusDocument.created_at.desc()).all()
+
+    if len(corpus_rows) < MIN_CORPUS_DOCS:
+        raise HTTPException(
+            400,
+            f"Only {len(corpus_rows)} corpus document(s) found for this query set. "
+            f"At least {MIN_CORPUS_DOCS} are required. "
+            "Build a corpus first in the Build Corpus tab."
+        )
+
+    corpus_contents = [row.content for row in corpus_rows]
+    corpus_meta = [
+        {"id": row.id, "title": row.title, "source_url": row.source_url,
+         "corpus_set_id": row.corpus_set_id}
+        for row in corpus_rows
+    ]
+
+    def _save_rule_set(model: str, rules: list, ge_log: list) -> dict:
+        model_total = len(body.engine_models)
+        name = body.rule_set_name if model_total == 1 else f"{body.rule_set_name} [{model.split('/')[-1]}]"
+        metadata = {
+            "queries": body.queries,
+            "query_set_id": body.query_set_id,
+            "corpus_set_ids": resolved_set_ids,
+            "corpus_doc_count": len(corpus_rows),
+            "source_urls": [m["source_url"] for m in corpus_meta if m.get("source_url")],
+            "ge_responses": ge_log,
+        }
+        db2 = SessionLocal()
+        try:
+            new_rs = RuleSet(
+                id=str(uuid_module.uuid4()),
+                name=name,
+                engine_model=model,
+                topic_domain="custom",
+                rules_json=json.dumps({"filtered_rules": rules}),
+                num_rules=len(rules),
+                is_builtin=False,
+                extraction_metadata_json=json.dumps(metadata),
+            )
+            db2.add(new_rs)
+            db2.commit()
+            db2.refresh(new_rs)
+            return {"model": model, "rule_set_id": new_rs.id, "num_rules": len(rules)}
+        finally:
+            db2.close()
+
+    async def event_generator():
         queue: asyncio.Queue = asyncio.Queue()
+        model_total = len(body.engine_models)
+
+        # Emit corpus info immediately so frontend can confirm what's being used
+        yield {"data": json.dumps({
+            "status": "corpus_info",
+            "corpus_doc_count": len(corpus_rows),
+            "corpus_set_ids": resolved_set_ids,
+        })}
 
         async def _run():
-            try:
-                rules = await extract_rules_stream(
-                    body.queries,
-                    body.engine_model,
-                    body.rule_set_name,
-                    lambda data: queue.put_nowait({"progress": data}),
-                )
-                await queue.put({"done": True, "rules": rules})
-            except Exception as e:
-                await queue.put({"done": True, "error": str(e)})
+            for model_index, engine_model in enumerate(body.engine_models):
+                try:
+                    def _cb(data: dict, mi: int = model_index, mt: int = model_total, em: str = engine_model) -> None:
+                        queue.put_nowait({"progress": {**data, "model": em, "model_index": mi, "model_total": mt}})
+
+                    rules, ge_log = await extract_rules_stream(
+                        body.queries,
+                        engine_model,
+                        body.rule_set_name,
+                        _cb,
+                        corpus_docs=corpus_contents,
+                    )
+                    saved = _save_rule_set(engine_model, rules, ge_log)
+                    queue.put_nowait({"saved": saved})
+                except Exception as e:
+                    logger.exception("Rule extraction failed for model %s", engine_model)
+                    queue.put_nowait({"saved": {"model": engine_model, "error": str(e)}})
+            await queue.put({"done": True})
 
         task = asyncio.create_task(_run())
+        all_saved: list[dict] = []
 
         while True:
             try:
-                item = await asyncio.wait_for(queue.get(), timeout=600)
+                item = await asyncio.wait_for(queue.get(), timeout=900)
             except asyncio.TimeoutError:
                 yield {"data": json.dumps({"status": "error", "message": "Timeout"})}
                 task.cancel()
@@ -175,117 +297,22 @@ async def extract_rules_endpoint(body: ExtractRulesRequest, db: Session = Depend
 
             if "progress" in item:
                 d = item["progress"]
-                yield {"data": json.dumps({"stage": d.get("stage"), "completed": d.get("completed"), "total": d.get("total")})}
+                yield {"data": json.dumps({
+                    "stage": d.get("stage"),
+                    "completed": d.get("completed"),
+                    "total": d.get("total"),
+                    "model": d.get("model"),
+                    "model_index": d.get("model_index"),
+                    "model_total": d.get("model_total"),
+                })}
+            elif "saved" in item:
+                # Emit immediately so frontend can refresh the rule set list
+                all_saved.append(item["saved"])
+                yield {"data": json.dumps({"status": "model_complete", "result": item["saved"]})}
             elif "done" in item:
-                if "error" in item:
-                    yield {"data": json.dumps({"status": "error", "message": item["error"]})}
-                else:
-                    rules = item["rules"]
-                    # Save to DB
-                    new_rs = RuleSet(
-                        id=str(uuid_module.uuid4()),
-                        name=body.rule_set_name,
-                        engine_model=body.engine_model,
-                        topic_domain="custom",
-                        rules_json=json.dumps({"filtered_rules": rules}),
-                        num_rules=len(rules),
-                        is_builtin=False,
-                    )
-                    db.add(new_rs)
-                    db.commit()
-                    db.refresh(new_rs)
-                    yield {"data": json.dumps({"status": "complete", "rule_set_id": new_rs.id, "num_rules": len(rules)})}
+                yield {"data": json.dumps({"status": "complete", "results": all_saved})}
                 return
 
-    return EventSourceResponse(event_generator_v2())
+    return EventSourceResponse(event_generator())
 
 
-class TrainingExportRequest(BaseModel):
-    rule_set_id: str
-    base_model: str = "Qwen/Qwen3-1.7B"
-    teacher_model: str = "gemini-2.5-flash"
-    cold_start_config: dict = {"lr": 2e-5, "epochs": 3, "batch_size": 4}
-    grpo_config: dict = {"group_size": 4, "clip_epsilon": 0.2, "kl_beta": 0.04}
-
-
-@router.post("/export-training-package")
-def export_training_package(body: TrainingExportRequest, db: Session = Depends(get_db)):
-    rs = db.query(RuleSet).filter(RuleSet.id == body.rule_set_id).first()
-    if not rs:
-        raise HTTPException(404, "Rule set not found")
-
-    rules_data = json.loads(rs.rules_json)
-
-    # Build all files
-    finetune_data = {
-        "base_model": body.base_model,
-        "teacher_model": body.teacher_model,
-        "rule_set": rs.name,
-        "num_rules": rs.num_rules,
-        "training_type": "cold_start_then_grpo",
-    }
-
-    cold_start_config = {
-        "model": body.base_model,
-        "teacher_model": body.teacher_model,
-        "learning_rate": body.cold_start_config.get("lr", 2e-5),
-        "num_epochs": body.cold_start_config.get("epochs", 3),
-        "batch_size": body.cold_start_config.get("batch_size", 4),
-        "training_type": "sft",
-        "dataset": "finetune.json",
-    }
-
-    grpo_config = {
-        "model": body.base_model,
-        "group_size": body.grpo_config.get("group_size", 4),
-        "clip_epsilon": body.grpo_config.get("clip_epsilon", 0.2),
-        "kl_beta": body.grpo_config.get("kl_beta", 0.04),
-        "training_type": "grpo",
-        "reward_model": body.teacher_model,
-    }
-
-    readme = f"""# AutoGEOMini Training Package
-
-Rule Set: {rs.name}
-Engine Model: {rs.engine_model}
-Base Model: {body.base_model}
-Teacher Model: {body.teacher_model}
-Number of Rules: {rs.num_rules}
-
-## Training Steps
-
-### Step 1: Cold Start (SFT) -- ~4 hours on 2x A100
-```bash
-python train.py --config config_cold_start.yaml
-```
-
-### Step 2: GRPO Reinforcement Learning -- ~48 hours on 2x A100
-```bash
-python train_grpo.py --config config_grpo.yaml
-```
-
-## Files
-- `finetune.json` -- training metadata
-- `rule_set.json` -- GEO rules used for reward model
-- `config_cold_start.yaml` -- SFT training configuration
-- `config_grpo.yaml` -- GRPO training configuration
-- `README_training.md` -- this file
-"""
-
-    # Create ZIP in memory
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("finetune.json", json.dumps(finetune_data, indent=2))
-        zf.writestr("rule_set.json", json.dumps(rules_data, indent=2))
-        zf.writestr("config_cold_start.yaml", yaml.dump(cold_start_config, default_flow_style=False))
-        zf.writestr("config_grpo.yaml", yaml.dump(grpo_config, default_flow_style=False))
-        zf.writestr("README_training.md", readme)
-
-    zip_buffer.seek(0)
-
-    from fastapi.responses import StreamingResponse
-    return StreamingResponse(
-        io.BytesIO(zip_buffer.read()),
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="autogeo-mini-{rs.name}.zip"'},
-    )

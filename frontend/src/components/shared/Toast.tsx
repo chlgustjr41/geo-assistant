@@ -36,7 +36,7 @@ export function ToastContainer() {
   const styles = {
     success: 'bg-green-50 border-green-300 text-green-900',
     error: 'bg-red-50 border-red-300 text-red-900',
-    info: 'bg-blue-50 border-blue-300 text-blue-900',
+    info: 'bg-primary-50 border-primary-300 text-primary-900',
   };
 
   return (

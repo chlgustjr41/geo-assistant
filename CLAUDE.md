@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CareYaya GEO Assistant — a tabbed local web app helping non-technical staff optimize blog content for AI-powered search engines using the AutoGEO framework (ICLR 2026). Three features: GEO Writing Assistant, Trend Discovery, Rule Extraction & Training Config.
+GEO Assistant — a tabbed local web app helping non-technical staff optimize blog content for AI-powered search engines using the AutoGEO framework (ICLR 2026). Three features: GEO Writing Assistant, Trend Discovery, Rule Extraction & Training Config.
 
 ## Commands
 
