@@ -7,8 +7,11 @@ export function LoginPage() {
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 w-full max-w-sm text-center space-y-6">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">GEO Assistant</h1>
-          <p className="text-sm text-gray-400 mt-1">
+          <h1 className="text-xl font-bold text-gray-900">GEO Rewrite Assistant</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            AI-powered article optimization for generative engine visibility
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5">
             Powered by AutoGEO &middot; ICLR 2026
           </p>
         </div>

@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
-from ..database import get_db
+from ..deps import get_user_db as get_db, get_user_email
 from ..models import RuleSet, CorpusDocument, CorpusSet, QuerySet
 from .. import job_manager
 
@@ -183,9 +183,9 @@ class ExtractRulesRequest(BaseModel):
 
 
 @router.post("/extract")
-async def extract_rules_endpoint(body: ExtractRulesRequest, db: Session = Depends(get_db)):
+async def extract_rules_endpoint(body: ExtractRulesRequest, db: Session = Depends(get_db), user_email: str | None = Depends(get_user_email)):
     from ..services.rule_extractor import extract_rules_stream, MIN_CORPUS_DOCS
-    from ..database import SessionLocal
+    from ..database import get_user_session_factory
     from ..models import CorpusSet
 
     if not body.engine_models:
@@ -235,7 +235,8 @@ async def extract_rules_endpoint(body: ExtractRulesRequest, db: Session = Depend
             "source_urls": [m["source_url"] for m in corpus_meta if m.get("source_url")],
             "ge_responses": ge_log,
         }
-        db2 = SessionLocal()
+        user_sf = get_user_session_factory(user_email)
+        db2 = user_sf()
         try:
             new_rs = RuleSet(
                 id=str(uuid_module.uuid4()),
@@ -254,7 +255,7 @@ async def extract_rules_endpoint(body: ExtractRulesRequest, db: Session = Depend
         finally:
             db2.close()
 
-    job = job_manager.create_job("extraction")
+    job = job_manager.create_job("extraction", user_email or "")
 
     async def event_generator():
         queue: asyncio.Queue = asyncio.Queue()

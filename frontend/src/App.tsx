@@ -1,11 +1,19 @@
+import { useEffect } from 'react';
 import { Layout } from './components/Layout';
 import { LoginPage } from './components/LoginPage';
+import { AccessDeniedPage } from './components/AccessDeniedPage';
 import { ExtractionProvider } from './contexts/ExtractionContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LoadingSpinner } from './components/shared/LoadingSpinner';
+import { setAccessDeniedHandler } from './services/api';
 
 function AppContent() {
-  const { user, loading } = useAuth();
+  const { user, loading, accessDenied, setAccessDenied } = useAuth();
+
+  // Wire the API interceptor to the auth context
+  useEffect(() => {
+    setAccessDeniedHandler(() => setAccessDenied(true));
+  }, [setAccessDenied]);
 
   if (loading) {
     return (
@@ -15,9 +23,13 @@ function AppContent() {
     );
   }
 
-  // When auth is not configured (VITE_FIREBASE_API_KEY empty), user is null
-  // but loading is false — show the app directly (local dev mode).
   const authEnabled = Boolean(import.meta.env.VITE_FIREBASE_API_KEY);
+
+  // Show access denied screen when user is signed in but not whitelisted
+  if (authEnabled && user && accessDenied) {
+    return <AccessDeniedPage />;
+  }
+
   if (authEnabled && !user) {
     return <LoginPage />;
   }

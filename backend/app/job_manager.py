@@ -21,6 +21,7 @@ from typing import Any
 class Job:
     id: str
     type: str
+    user_email: str = ""
     status: str = "running"
     progress: dict = field(default_factory=dict)
     result: Any = None
@@ -40,9 +41,9 @@ def _cleanup() -> None:
         del _jobs[jid]
 
 
-def create_job(job_type: str) -> Job:
+def create_job(job_type: str, user_email: str = "") -> Job:
     _cleanup()
-    job = Job(id=str(uuid.uuid4()), type=job_type)
+    job = Job(id=str(uuid.uuid4()), type=job_type, user_email=user_email.lower())
     _jobs[job.id] = job
     return job
 
@@ -71,10 +72,11 @@ def fail_job(job_id: str, error: str) -> None:
         job.error = error
 
 
-def list_running() -> list[dict]:
+def list_running(user_email: str = "") -> list[dict]:
     _cleanup()
+    email = user_email.lower()
     return [
         {"id": j.id, "type": j.type, "status": j.status, "progress": j.progress}
         for j in _jobs.values()
-        if j.status == "running"
+        if j.status == "running" and (not email or j.user_email == email)
     ]

@@ -29,17 +29,24 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
-// On 401, sign the user out so they see the login page.
-// 403 on /api/admin/* is expected for non-admins — don't sign out.
+// Callback set by App to notify AuthContext of access denied
+let _onAccessDenied: (() => void) | null = null;
+export function setAccessDeniedHandler(handler: () => void) {
+  _onAccessDenied = handler;
+}
+
+// On 401, sign the user out. On 403 (not whitelisted), show access denied screen.
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const status = error.response?.status;
     const url: string = error.config?.url || '';
     const isAdminRoute = url.includes('/api/admin/');
-    if (status === 401 || (status === 403 && !isAdminRoute)) {
+    if (status === 401) {
       const { signOut } = await import('firebase/auth');
       await signOut(auth).catch(() => {});
+    } else if (status === 403 && !isAdminRoute) {
+      _onAccessDenied?.();
     }
     return Promise.reject(error);
   },

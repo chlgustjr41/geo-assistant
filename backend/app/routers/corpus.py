@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
-from ..database import get_db
+from ..deps import get_user_db as get_db, get_user_email
 from ..models import CorpusDocument, QuerySet
 from .. import job_manager
 
@@ -184,17 +184,17 @@ class BulkAddUrlsRequest(BaseModel):
 
 
 @router.post("/bulk-add-urls")
-async def bulk_add_urls(body: BulkAddUrlsRequest, db: Session = Depends(get_db)):
+async def bulk_add_urls(body: BulkAddUrlsRequest, db: Session = Depends(get_db), user_email: str | None = Depends(get_user_email)):
     """Scrape a list of URLs concurrently, streaming per-URL progress via SSE."""
     from ..services.article_scraper import scrape_url
-    from ..database import SessionLocal
+    from ..database import get_user_session_factory
 
     if not body.urls:
         raise HTTPException(400, "No URLs provided")
     if len(body.urls) > 50:
         raise HTTPException(400, "Maximum 50 URLs per batch")
 
-    job = job_manager.create_job("corpus_import")
+    job = job_manager.create_job("corpus_import", user_email or "")
 
     async def event_generator():
         queue: asyncio.Queue = asyncio.Queue()
@@ -218,7 +218,8 @@ async def bulk_add_urls(body: BulkAddUrlsRequest, db: Session = Depends(get_db))
         added = 0
         failed: list[dict] = []
         completed = 0
-        db2 = SessionLocal()
+        user_sf = get_user_session_factory(user_email)
+        db2 = user_sf()
 
         try:
             while completed < total:

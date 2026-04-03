@@ -1,6 +1,6 @@
 """Startup DB maintenance: remove legacy built-in rule sets and migrate deprecated model IDs."""
 from __future__ import annotations
-from .database import SessionLocal
+from sqlalchemy.orm import sessionmaker
 from .models import RuleSet
 
 _DEPRECATED_ENGINE_MODELS: dict[str, str] = {
@@ -9,14 +9,15 @@ _DEPRECATED_ENGINE_MODELS: dict[str, str] = {
 }
 
 
-def seed_rule_sets() -> None:
-    db = SessionLocal()
+def seed_rule_sets(session_factory: sessionmaker | None = None) -> None:
+    if session_factory is None:
+        from .database import SessionLocal
+        session_factory = SessionLocal
+    db = session_factory()
     try:
-        # Remove any previously seeded built-in rule sets (no longer shipped)
         db.query(RuleSet).filter(RuleSet.is_builtin == True).delete()
         db.commit()
 
-        # Migrate deprecated model IDs on user-created rule sets
         for old_id, new_id in _DEPRECATED_ENGINE_MODELS.items():
             db.query(RuleSet).filter(RuleSet.engine_model == old_id).update(
                 {"engine_model": new_id}

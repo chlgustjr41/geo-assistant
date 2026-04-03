@@ -11,16 +11,20 @@ interface AuthContextValue {
   user: User | null;
   loading: boolean;
   error: string | null;
+  accessDenied: boolean;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
+  setAccessDenied: (denied: boolean) => void;
 }
 
 const AuthContext = createContext<AuthContextValue>({
   user: null,
   loading: true,
   error: null,
+  accessDenied: false,
   signIn: async () => {},
   signOut: async () => {},
+  setAccessDenied: () => {},
 });
 
 /** True when Firebase config env vars are present. */
@@ -30,18 +34,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(authEnabled);
   const [error, setError] = useState<string | null>(null);
+  const [accessDenied, setAccessDenied] = useState(false);
 
   useEffect(() => {
     if (!authEnabled) return;
     const unsub = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
       setLoading(false);
+      // Reset access denied when user changes (e.g. signs out and signs in with different account)
+      if (!firebaseUser) setAccessDenied(false);
     });
     return unsub;
   }, []);
 
   const signIn = async () => {
     setError(null);
+    setAccessDenied(false);
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (e: unknown) {
@@ -53,13 +61,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     await firebaseSignOut(auth);
     setUser(null);
+    setAccessDenied(false);
   };
 
-  // When Firebase is not configured, skip auth entirely (local dev)
   if (!authEnabled) {
     return (
       <AuthContext.Provider
-        value={{ user: null, loading: false, error: null, signIn, signOut }}
+        value={{ user: null, loading: false, error: null, accessDenied: false, signIn, signOut, setAccessDenied }}
       >
         {children}
       </AuthContext.Provider>
@@ -67,7 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, error, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, loading, error, accessDenied, signIn, signOut, setAccessDenied }}>
       {children}
     </AuthContext.Provider>
   );

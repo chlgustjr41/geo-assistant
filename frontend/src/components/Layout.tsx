@@ -74,7 +74,7 @@ export function Layout() {
           <div className="flex items-center gap-8">
             <div className="py-3 shrink-0">
               <h1 className="text-base font-bold text-gray-900">
-                GEO Assistant
+                GEO Rewrite Assistant
               </h1>
               <p className="text-xs text-gray-400">
                 Powered by AutoGEO &middot; ICLR 2026

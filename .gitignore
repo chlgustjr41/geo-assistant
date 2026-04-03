@@ -30,6 +30,7 @@ htmlcov/
 backend/data/careyaya_geo.db
 backend/data/careyaya_geo.db-shm
 backend/data/careyaya_geo.db-wal
+backend/data/users/
 *.db
 *.sqlite
 *.sqlite3
