@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-GEO Assistant — a tabbed local web app helping non-technical staff optimize blog content for AI-powered search engines using the AutoGEO framework (ICLR 2026). Three features: GEO Writing Assistant, Trend Discovery, Rule Extraction & Training Config.
+GEO Rewrite Assistant — a web app helping content teams optimize articles for AI-powered search engines (ChatGPT, Gemini, Perplexity) using the AutoGEO framework (Wu et al., ICLR 2026). Two tabs: **Writing Assistant** (rewrite + evaluate) and **Rules & Corpus** (query sets, corpus, rule extraction). Plus **Settings** and **Admin** (super-admin whitelist management).
+
+**Live:** https://geo-rewrite-assistant.web.app
 
 ## Commands
 
@@ -26,51 +28,61 @@ npm run dev    # http://localhost:5173
 npm run build  # TypeScript check + Vite production build
 ```
 
+### Deployment
+```bash
+# Frontend → Firebase Hosting
+cd frontend && npm run build && npx firebase deploy --only hosting
+
+# Backend → GCP VM (project: gen-lang-client-0664573611)
+gcloud compute ssh geo-rewrite-assistant-backend \
+  --zone=us-central1-a \
+  --project=gen-lang-client-0664573611 \
+  --command="cd /opt/geo-assistant && sudo git pull origin master && sudo systemctl restart geo-assistant"
+```
+
 ## Architecture
 
 ### Tech Stack
-- **Frontend:** React 18, TypeScript, Vite, TailwindCSS (no custom CSS files), Recharts, Axios
-- **Backend:** Python 3.11+, FastAPI, Uvicorn (async throughout — httpx only, no requests)
-- **Database:** SQLite via SQLAlchemy (`backend/data/careyaya_geo.db`) — zero-config
+- **Frontend:** React 18, TypeScript, Vite, TailwindCSS (no custom CSS files), Axios, Firebase SDK, @tanstack/react-query
+- **Backend:** Python 3.11+, FastAPI, Uvicorn (async throughout — httpx only, no requests), Firebase Admin SDK
+- **Database:** Per-user SQLite via SQLAlchemy (`backend/data/users/<sha256_hash>/geo.db`)
+- **Auth:** Firebase Authentication (Google sign-in) + email whitelist in `.env`
 - **LLM APIs:** OpenAI, Google Gemini, Anthropic Claude (unified via `llm_client.py`)
-- **Trends:** trendspyg (active replacement for deprecated pytrends)
 - **Retrieval:** rank-bm25 for GEO evaluation document ranking
+- **Search:** ddgs (DuckDuckGo) for corpus document discovery
+- **Hosting:** Firebase Hosting (frontend) + GCP e2-micro VM (backend, Nginx HTTPS reverse proxy)
 
 ### Key Architecture Decisions
+- **Per-user databases** — each authenticated user gets their own SQLite DB. Complete data isolation.
+- **Firebase Auth** — Google sign-in with backend token verification. Email whitelist prevents unauthorized LLM API usage. Auth bypassed when `VITE_FIREBASE_API_KEY` is not set (local dev).
+- **Background jobs** — Rewrite and GEO evaluation run as `asyncio.create_task()`, return `{job_id}` immediately. Frontend polls `GET /api/jobs/{id}` every 3s.
+- **Persistent job flags** — `active_jobs` table in per-user DB survives sign-out/sign-in. Cross-referenced with in-memory `job_manager` on recovery.
+- **SSE for extraction** — Rule extraction and corpus import stream progress via Server-Sent Events.
 - Vite dev server proxies `/api` → `http://localhost:8000` (see `vite.config.ts`)
 - API keys live in `backend/.env` only — never sent to or stored in the frontend
-- Long-running tasks (rule extraction ~3-5 min) use SSE via `sse-starlette`
-- Pre-built rule sets auto-seed into DB on first run from `backend/data/rule_sets/*.json`
 - All LLM calls are async (httpx); blocking calls are forbidden
 
 ### Backend Data Flow
 ```
-FastAPI (main.py)
-  ├── /api/writing/*  → writing.py   → geo_rewriter.py + geo_evaluator.py
-  ├── /api/trends/*   → trends.py    → trend_service.py (24h SQLite cache)
-  ├── /api/rules/*    → rules.py     → rule_extractor.py (SSE progress stream)
-  └── /api/settings/* → settings.py → reads/writes .env file
+FastAPI (main.py) — all routers protected by Depends(get_current_user)
+  ├── /api/writing/*      → writing.py      → geo_rewriter.py + geo_evaluator.py (job-based)
+  ├── /api/rules/*        → rules.py        → rule_extractor.py (SSE progress stream)
+  ├── /api/corpus/*       → corpus.py       → document CRUD, discover, bulk import (SSE)
+  ├── /api/corpus-sets/*  → corpus_sets.py  → corpus set management
+  ├── /api/query-sets/*   → query_sets.py   → query set CRUD
+  ├── /api/jobs/*         → jobs.py         → job polling + persistent active-job flags
+  ├── /api/settings/*     → settings.py     → API key status, defaults, reset
+  └── /api/admin/*        → admin.py        → email whitelist (super-admin only)
 ```
-
-### GEO Evaluation Pipeline (`geo_evaluator.py`)
-The core demo feature — reproduces AutoGEO paper (Wu et al., ICLR 2026) Equation 1:
-1. Auto-generate a test query from article content (cheapest LLM)
-2. Build 5-doc competing set: BM25-ranked DB articles + LLM-generated synthetic competitors
-3. Simulate RAG generative engine (prompt: sources → cited answer) — run TWICE (original + optimized)
-4. Score: Word = cited words / total response words × 100; Pos = position-weighted variant; Overall = (Word + Pos) / 2
-5. Return before/after scores, both GE responses, per-source citation breakdown
-
-### Rule Extraction Pipeline (`rule_extractor.py`)
-AutoGEO 4-stage pipeline: **Explainer → Extractor → Merger → Filter**
-- Uses LLM-generated synthetic documents (5 quality tiers per query) since ClueWeb22 is unavailable locally
-- Progress streamed via SSE; hierarchical Merger chunks insights in groups of 50
-- Cost estimate: ~$0.30–0.80 per run
 
 ### Database Models
 - `RuleSet` — named rule collections; `is_builtin=True` prevents deletion of shipped defaults
 - `Article` — rewrite history with GEO scores
-- `CompetitorDoc` — cached synthetic competitor documents (reused across evaluations)
-- `TrendCache` — Google Trends results with 24h TTL
+- `QuerySet` — named collections of search queries for evaluation and extraction
+- `CorpusSet` — grouped collections of corpus documents
+- `CorpusDocument` — competing documents for GEO evaluation (scraped or manual)
+- `ActiveJob` — persistent job flags for recovery across sign-out/sign-in
+- `CompetitorDoc` — legacy cache of synthetic competitor documents
 
 ### AutoGEO Vendored Code (`backend/autogeo/`)
 Adapted from github.com/cxcscmu/AutoGEO (MIT). Key changes from original:
@@ -81,18 +93,21 @@ Adapted from github.com/cxcscmu/AutoGEO (MIT). Key changes from original:
 
 ## Environment Variables
 
-The user must manually create `backend/.env` from `backend/.env.example`. Required keys:
+### Backend (`backend/.env`)
 ```
 OPENAI_API_KEY=sk-...
 GOOGLE_API_KEY=AI...
 ANTHROPIC_API_KEY=sk-ant-...
+FIREBASE_SERVICE_ACCOUNT_PATH=./service-account.json
+ALLOWED_EMAILS=user1@gmail.com,user2@gmail.com
+CORS_ORIGINS=https://geo-rewrite-assistant.web.app,http://localhost:5173
+DEFAULT_MODEL=gemini-2.5-flash-lite
 ```
 
-## Implementation Phases (from PRODUCTION.md)
-
-1. **Foundation** — Vite+FastAPI scaffold, SQLite models, llm_client, article_scraper, Settings tab, rule set seeding
-2. **Writing Assistant Core** — geo_rewriter, side-by-side UI, rewrite/scrape endpoints
-3. **GEO Evaluation** — document_retriever (BM25), geo_evaluator, score panel UI
-4. **Trend Discovery** — trend_service (trendspyg), recharts line chart, keyword send
-5. **Rule Extraction & Training** — query_generator, rule_extractor (SSE), Rule Set Manager, AutoGEOMini export
-6. **Polish** — loading states, empty states, toasts, responsive layout
+### Frontend (`frontend/.env`)
+```
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=...
+VITE_FIREBASE_PROJECT_ID=...
+VITE_API_BASE_URL=https://34.29.91.25   # omit for local dev (uses Vite proxy)
+```
