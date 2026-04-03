@@ -60,6 +60,16 @@ def get_allowed_emails() -> list[str]:
     return [e.strip().lower() for e in raw.split(",") if e.strip()]
 
 
+def get_max_corpus_urls() -> int:
+    """Maximum URLs per bulk corpus import batch."""
+    return int(os.getenv("MAX_CORPUS_URLS", "50"))
+
+
+def get_max_queries_per_set() -> int:
+    """Maximum queries allowed in a single query set."""
+    return int(os.getenv("MAX_QUERIES_PER_SET", "50"))
+
+
 def update_env(key: str, value: str) -> None:
     """Update or insert a key in the .env file."""
     lines: list[str] = []

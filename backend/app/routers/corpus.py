@@ -190,10 +190,12 @@ async def bulk_add_urls(body: BulkAddUrlsRequest, db: Session = Depends(get_db),
     from ..services.article_scraper import scrape_url
     from ..database import get_user_session_factory
 
+    from ..config import get_max_corpus_urls
+    max_urls = get_max_corpus_urls()
     if not body.urls:
         raise HTTPException(400, "No URLs provided")
-    if len(body.urls) > 50:
-        raise HTTPException(400, "Maximum 50 URLs per batch")
+    if len(body.urls) > max_urls:
+        raise HTTPException(400, f"Maximum {max_urls} URLs per batch (configurable in Settings)")
 
     job = job_manager.create_job("corpus_import", user_email or "")
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Globe, Plus, Link, FileText, CheckSquare, Square, ChevronDown, ChevronUp, Database, Pencil } from 'lucide-react';
-import { corpusApi, corpusSetApi, jobsApi, getAuthHeaders, apiUrl } from '../../services/api';
+import { Globe, Plus, Link, FileText, CheckSquare, Square, ChevronDown, ChevronUp, Database, Pencil, X } from 'lucide-react';
+import { corpusApi, corpusSetApi, jobsApi, settingsApi, getAuthHeaders, apiUrl } from '../../services/api';
 import type { DiscoverResult } from '../../services/api';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { toast } from '../shared/Toast';
@@ -22,7 +22,8 @@ export function BuildCorpus({ onCorpusChanged }: Props) {
   const { querySets, corpusSets, reloadCorpusSets } = useRulesCorpusContext();
 
   const [selectedQsId, setSelectedQsId] = useState('');
-  const [maxUrls, setMaxUrls] = useState(20);
+  const [maxUrlsStr, setMaxUrlsStr] = useState('20');
+  const maxUrls = Math.max(1, parseInt(maxUrlsStr, 10) || 20);
 
   const [discovering, setDiscovering] = useState(false);
   const [discovered, setDiscovered] = useState<DiscoverResult[] | null>(null);
@@ -32,6 +33,7 @@ export function BuildCorpus({ onCorpusChanged }: Props) {
   const { importing, setImporting } = useActiveJobs();
   const [importProgress, setImportProgress] = useState<{ completed: number; total: number; added: number; failedCount: number } | null>(null);
   const [importFailures, setImportFailures] = useState<Array<{ url: string; error: string }>>([]);
+  const [maxCorpusUrlsCap, setMaxCorpusUrlsCap] = useState<number>(50);
 
   // Corpus set naming for the import batch
   const [corpusSetName, setCorpusSetName] = useState('');
@@ -47,6 +49,7 @@ export function BuildCorpus({ onCorpusChanged }: Props) {
 
   useEffect(() => {
     loadDocs();
+    settingsApi.get().then((s) => setMaxCorpusUrlsCap(s.max_corpus_urls)).catch(() => {});
   }, []);
 
   // Auto-select first query set when list loads
@@ -381,12 +384,14 @@ export function BuildCorpus({ onCorpusChanged }: Props) {
               <input
                 type="number"
                 min={1}
-                max={200}
-                value={maxUrls}
-                onChange={(e) => setMaxUrls(Math.max(1, Math.min(200, Number(e.target.value) || 1)))}
+                max={maxCorpusUrlsCap}
+                value={maxUrlsStr}
+                onChange={(e) => setMaxUrlsStr(e.target.value)}
+                onBlur={() => setMaxUrlsStr(String(Math.max(1, Math.min(maxCorpusUrlsCap, maxUrls))))}
                 className="w-full px-2.5 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
                 placeholder="e.g. 20"
               />
+              <p className="text-xs text-gray-400 mt-0.5">Batch limit: {maxCorpusUrlsCap} URLs</p>
             </div>
           </div>
         )}
@@ -508,7 +513,14 @@ export function BuildCorpus({ onCorpusChanged }: Props) {
         )}
 
         {importFailures.length > 0 && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-1">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-1 relative">
+            <button
+              onClick={() => setImportFailures([])}
+              className="absolute top-2 right-2 p-0.5 text-red-400 hover:text-red-600 rounded"
+              title="Dismiss"
+            >
+              <X size={14} />
+            </button>
             <p className="text-xs font-semibold text-red-700">{importFailures.length} URL{importFailures.length !== 1 ? 's' : ''} failed to scrape</p>
             {importFailures.map((f) => {
               const reason = f.error.includes('403') ? '403 — site blocks bots'

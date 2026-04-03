@@ -55,6 +55,8 @@ export const settingsApi = {
   updateDefaults: (data: {
     default_model?: string;
     default_rule_set?: string;
+    max_corpus_urls?: number;
+    max_queries_per_set?: number;
   }) => api.put<{ ok: boolean }>('/api/settings/defaults', data).then((r) => r.data),
   resetWorkspace: () =>
     api.post<{ ok: boolean }>('/api/settings/reset-workspace').then((r) => r.data),

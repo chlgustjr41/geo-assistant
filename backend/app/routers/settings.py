@@ -8,6 +8,8 @@ from ..config import (
     get_anthropic_key,
     get_default_model,
     get_default_rule_set,
+    get_max_corpus_urls,
+    get_max_queries_per_set,
     update_env,
     reload_env,
     _key_is_configured,
@@ -25,12 +27,16 @@ async def get_settings():
         "anthropic_key_set": _key_is_configured(get_anthropic_key()),
         "default_model": get_default_model(),
         "default_rule_set": get_default_rule_set(),
+        "max_corpus_urls": get_max_corpus_urls(),
+        "max_queries_per_set": get_max_queries_per_set(),
     }
 
 
 class DefaultsUpdate(BaseModel):
     default_model: str | None = None
     default_rule_set: str | None = None
+    max_corpus_urls: int | None = None
+    max_queries_per_set: int | None = None
 
 
 @router.put("/defaults")
@@ -39,6 +45,10 @@ async def update_defaults(body: DefaultsUpdate):
         update_env("DEFAULT_MODEL", body.default_model)
     if body.default_rule_set is not None:
         update_env("DEFAULT_RULE_SET", body.default_rule_set)
+    if body.max_corpus_urls is not None:
+        update_env("MAX_CORPUS_URLS", str(max(1, body.max_corpus_urls)))
+    if body.max_queries_per_set is not None:
+        update_env("MAX_QUERIES_PER_SET", str(max(1, body.max_queries_per_set)))
     return {"ok": True}
 
 

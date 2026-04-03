@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CheckCircle, XCircle, Save } from 'lucide-react';
 import { useSettings } from '../../hooks/useSettings';
 import { settingsApi } from '../../services/api';
@@ -23,7 +23,18 @@ function ProviderStatus({ label, isSet }: { label: string; isSet: boolean }) {
 export function Settings() {
   const { settings, loading, error, reload } = useSettings();
   const [defaultModel, setDefaultModel] = useState('');
+  const [maxCorpusUrls, setMaxCorpusUrls] = useState('');
+  const [maxQueriesPerSet, setMaxQueriesPerSet] = useState('');
   const [savingDefaults, setSavingDefaults] = useState(false);
+
+  // Initialize controlled inputs from loaded settings
+  useEffect(() => {
+    if (settings) {
+      setDefaultModel(settings.default_model);
+      setMaxCorpusUrls(String(settings.max_corpus_urls));
+      setMaxQueriesPerSet(String(settings.max_queries_per_set));
+    }
+  }, [settings]);
 
   if (loading) {
     return (
@@ -49,8 +60,12 @@ export function Settings() {
   const handleSaveDefaults = async () => {
     setSavingDefaults(true);
     try {
+      const corpusUrlsNum = maxCorpusUrls ? Math.max(1, parseInt(maxCorpusUrls, 10)) : undefined;
+      const queriesNum = maxQueriesPerSet ? Math.max(1, parseInt(maxQueriesPerSet, 10)) : undefined;
       await settingsApi.updateDefaults({
         default_model: defaultModel || undefined,
+        max_corpus_urls: corpusUrlsNum && !isNaN(corpusUrlsNum) ? corpusUrlsNum : undefined,
+        max_queries_per_set: queriesNum && !isNaN(queriesNum) ? queriesNum : undefined,
       });
       toast('success', 'Defaults saved');
       reload();
@@ -81,7 +96,7 @@ export function Settings() {
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Default Pipeline Model</label>
           <select
-            defaultValue={settings.default_model}
+            value={defaultModel}
             onChange={(e) => setDefaultModel(e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
@@ -89,6 +104,31 @@ export function Settings() {
               <option key={m.id} value={m.id}>{m.label}</option>
             ))}
           </select>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Max Corpus URLs per Batch</label>
+            <input
+              type="number"
+              min={1}
+              value={maxCorpusUrls}
+              onChange={(e) => setMaxCorpusUrls(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+            <p className="text-xs text-gray-400 mt-0.5">Limits bulk URL import in Build Corpus</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Max Queries per Set</label>
+            <input
+              type="number"
+              min={1}
+              value={maxQueriesPerSet}
+              onChange={(e) => setMaxQueriesPerSet(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+            <p className="text-xs text-gray-400 mt-0.5">Limits queries saved in a query set</p>
+          </div>
         </div>
 
         <button

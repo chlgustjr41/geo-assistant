@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ..deps import get_user_db as get_db
 from ..models import QuerySet
+from ..config import get_max_queries_per_set
 
 router = APIRouter(prefix="/api/query-sets", tags=["query-sets"])
 
@@ -38,6 +39,9 @@ def create_query_set(body: CreateQuerySetRequest, db: Session = Depends(get_db))
         raise HTTPException(400, "Name is required")
     if not body.queries:
         raise HTTPException(400, "At least one query is required")
+    max_queries = get_max_queries_per_set()
+    if len(body.queries) > max_queries:
+        raise HTTPException(400, f"Maximum {max_queries} queries per set (configurable in Settings)")
     qs = QuerySet(
         id=str(uuid_module.uuid4()),
         name=body.name.strip(),

@@ -179,6 +179,8 @@ export interface AppSettings {
   anthropic_key_set: boolean;
   default_model: string;
   default_rule_set: string;
+  max_corpus_urls: number;
+  max_queries_per_set: number;
 }
 
 export const GE_MODELS = [

@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { List, Plus, X, RefreshCw, Trash2, ChevronDown, ChevronUp, Save, Link, FileText } from 'lucide-react';
-import { rulesApi, querySetApi, writingApi } from '../../services/api';
+import { rulesApi, querySetApi, writingApi, settingsApi } from '../../services/api';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { toast } from '../shared/Toast';
 import { useRulesCorpusContext } from '../../contexts/RulesCorpusContext';
@@ -28,7 +28,8 @@ export function QuerySetManager({ onQuerySetSaved }: Props) {
   // Shared
   const [queries, setQueries] = useState<string[]>([]);
   const [draftName, setDraftName] = useState('');
-  const [numQueries, setNumQueries] = useState<number>(20);
+  const [numQueriesStr, setNumQueriesStr] = useState('20');
+  const numQueries = Math.max(1, parseInt(numQueriesStr, 10) || 20);
 
   const { setGenerating: setGlobalGenerating } = useActiveJobs();
   const [generating, _setGenerating] = useState(false);
@@ -36,8 +37,13 @@ export function QuerySetManager({ onQuerySetSaved }: Props) {
   const [appending, setAppending] = useState(false);
   const [saving, setSaving] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [maxQueriesCap, setMaxQueriesCap] = useState<number>(50);
 
   const newQueryRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    settingsApi.get().then((s) => setMaxQueriesCap(s.max_queries_per_set)).catch(() => {});
+  }, []);
 
   const handleScrapeUrl = async () => {
     if (!articleUrl.trim()) { toast('error', 'Enter a URL first'); return; }
@@ -191,9 +197,10 @@ export function QuerySetManager({ onQuerySetSaved }: Props) {
                 <input
                   type="number"
                   min={5}
-                  max={50}
-                  value={numQueries}
-                  onChange={(e) => setNumQueries(Math.max(5, Math.min(50, Number(e.target.value) || 20)))}
+                  max={maxQueriesCap}
+                  value={numQueriesStr}
+                  onChange={(e) => setNumQueriesStr(e.target.value)}
+                  onBlur={() => setNumQueriesStr(String(Math.max(1, Math.min(maxQueriesCap, numQueries))))}
                   className="w-16 px-2 py-1.5 border border-gray-300 rounded-lg text-sm text-center focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
               </div>
@@ -252,9 +259,10 @@ export function QuerySetManager({ onQuerySetSaved }: Props) {
                 <input
                   type="number"
                   min={5}
-                  max={50}
-                  value={numQueries}
-                  onChange={(e) => setNumQueries(Math.max(5, Math.min(50, Number(e.target.value) || 20)))}
+                  max={maxQueriesCap}
+                  value={numQueriesStr}
+                  onChange={(e) => setNumQueriesStr(e.target.value)}
+                  onBlur={() => setNumQueriesStr(String(Math.max(1, Math.min(maxQueriesCap, numQueries))))}
                   className="w-16 px-2 py-1.5 border border-gray-300 rounded-lg text-sm text-center focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
               </div>
@@ -275,7 +283,10 @@ export function QuerySetManager({ onQuerySetSaved }: Props) {
           <div className="space-y-3 pt-2 border-t border-gray-100">
             {/* Header row */}
             <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-gray-600">{queries.length} queries</p>
+              <p className="text-xs font-medium text-gray-600">
+                {queries.length} queries
+                <span className="text-gray-400 font-normal ml-1">(max {maxQueriesCap})</span>
+              </p>
               <button
                 onClick={handleAppend}
                 disabled={appending || !canGenerate}
