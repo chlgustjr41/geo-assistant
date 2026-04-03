@@ -5,8 +5,10 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sse_starlette.sse import EventSourceResponse
 from ..database import get_db
 from ..models import CorpusDocument, QuerySet
+from .. import job_manager
 
 logger = logging.getLogger(__name__)
 
@@ -183,47 +185,86 @@ class BulkAddUrlsRequest(BaseModel):
 
 @router.post("/bulk-add-urls")
 async def bulk_add_urls(body: BulkAddUrlsRequest, db: Session = Depends(get_db)):
-    """Scrape a list of URLs concurrently and add them all to the corpus."""
+    """Scrape a list of URLs concurrently, streaming per-URL progress via SSE."""
     from ..services.article_scraper import scrape_url
+    from ..database import SessionLocal
 
     if not body.urls:
         raise HTTPException(400, "No URLs provided")
     if len(body.urls) > 50:
         raise HTTPException(400, "Maximum 50 URLs per batch")
 
-    semaphore = asyncio.Semaphore(5)  # max 5 concurrent scrapes
+    job = job_manager.create_job("corpus_import")
 
-    async def _scrape_one(url: str) -> dict:
-        async with semaphore:
-            try:
-                scraped = await scrape_url(url)
-                return {"url": url, "scraped": scraped, "error": None}
-            except Exception as e:
-                return {"url": url, "scraped": None, "error": str(e)}
+    async def event_generator():
+        queue: asyncio.Queue = asyncio.Queue()
+        total = len(body.urls)
+        semaphore = asyncio.Semaphore(5)
 
-    results = await asyncio.gather(*[_scrape_one(u) for u in body.urls])
+        async def _scrape_one(url: str, index: int) -> None:
+            async with semaphore:
+                try:
+                    scraped = await scrape_url(url)
+                    queue.put_nowait({"index": index, "url": url, "scraped": scraped, "error": None})
+                except Exception as e:
+                    queue.put_nowait({"index": index, "url": url, "scraped": None, "error": str(e)})
 
-    added = 0
-    failed: list[dict] = []
-    for r in results:
-        if r["scraped"]:
-            s = r["scraped"]
-            wc = len(s["content"].split())
-            doc = CorpusDocument(
-                title=s.get("title") or r["url"],
-                source_url=r["url"],
-                content=s["content"],
-                word_count=wc,
-                query_set_id=body.query_set_id,
-                corpus_set_id=body.corpus_set_id,
-            )
-            db.add(doc)
-            added += 1
-        else:
-            failed.append({"url": r["url"], "error": r["error"]})
+        # Emit job ID immediately
+        yield {"data": json.dumps({"status": "started", "job_id": job.id, "total": total})}
 
-    db.commit()
-    return {"added": added, "failed": failed}
+        # Launch all scrapes
+        tasks = [asyncio.create_task(_scrape_one(u, i)) for i, u in enumerate(body.urls)]
+
+        added = 0
+        failed: list[dict] = []
+        completed = 0
+        db2 = SessionLocal()
+
+        try:
+            while completed < total:
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=300)
+                except asyncio.TimeoutError:
+                    job_manager.fail_job(job.id, "Timeout")
+                    yield {"data": json.dumps({"status": "error", "message": "Timeout"})}
+                    return
+
+                completed += 1
+
+                if item["scraped"]:
+                    s = item["scraped"]
+                    wc = len(s["content"].split())
+                    doc = CorpusDocument(
+                        title=s.get("title") or item["url"],
+                        source_url=item["url"],
+                        content=s["content"],
+                        word_count=wc,
+                        query_set_id=body.query_set_id,
+                        corpus_set_id=body.corpus_set_id,
+                    )
+                    db2.add(doc)
+                    added += 1
+                    progress_msg = {"status": "progress", "completed": completed, "total": total,
+                                    "url": item["url"], "success": True, "title": s.get("title", ""),
+                                    "added": added, "failed_count": len(failed)}
+                else:
+                    failed.append({"url": item["url"], "error": item["error"]})
+                    progress_msg = {"status": "progress", "completed": completed, "total": total,
+                                    "url": item["url"], "success": False, "error": item["error"],
+                                    "added": added, "failed_count": len(failed)}
+
+                job_manager.update_progress(job.id, {"completed": completed, "total": total, "added": added, "failed_count": len(failed)})
+                yield {"data": json.dumps(progress_msg)}
+
+            db2.commit()
+        finally:
+            db2.close()
+
+        result = {"added": added, "failed": failed}
+        job_manager.complete_job(job.id, result)
+        yield {"data": json.dumps({"status": "complete", "added": added, "failed": failed})}
+
+    return EventSourceResponse(event_generator())
 
 
 # ---------------------------------------------------------------------------

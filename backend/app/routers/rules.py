@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 from ..database import get_db
 from ..models import RuleSet, CorpusDocument, CorpusSet, QuerySet
+from .. import job_manager
 
 logger = logging.getLogger(__name__)
 
@@ -253,13 +254,16 @@ async def extract_rules_endpoint(body: ExtractRulesRequest, db: Session = Depend
         finally:
             db2.close()
 
+    job = job_manager.create_job("extraction")
+
     async def event_generator():
         queue: asyncio.Queue = asyncio.Queue()
         model_total = len(body.engine_models)
 
-        # Emit corpus info immediately so frontend can confirm what's being used
+        # Emit job ID + corpus info immediately
         yield {"data": json.dumps({
             "status": "corpus_info",
+            "job_id": job.id,
             "corpus_doc_count": len(corpus_rows),
             "corpus_set_ids": resolved_set_ids,
         })}
@@ -268,7 +272,9 @@ async def extract_rules_endpoint(body: ExtractRulesRequest, db: Session = Depend
             for model_index, engine_model in enumerate(body.engine_models):
                 try:
                     def _cb(data: dict, mi: int = model_index, mt: int = model_total, em: str = engine_model) -> None:
-                        queue.put_nowait({"progress": {**data, "model": em, "model_index": mi, "model_total": mt}})
+                        progress = {**data, "model": em, "model_index": mi, "model_total": mt}
+                        queue.put_nowait({"progress": progress})
+                        job_manager.update_progress(job.id, progress)
 
                     rules, ge_log = await extract_rules_stream(
                         body.queries,
@@ -291,6 +297,7 @@ async def extract_rules_endpoint(body: ExtractRulesRequest, db: Session = Depend
             try:
                 item = await asyncio.wait_for(queue.get(), timeout=900)
             except asyncio.TimeoutError:
+                job_manager.fail_job(job.id, "Timeout")
                 yield {"data": json.dumps({"status": "error", "message": "Timeout"})}
                 task.cancel()
                 return
@@ -306,10 +313,10 @@ async def extract_rules_endpoint(body: ExtractRulesRequest, db: Session = Depend
                     "model_total": d.get("model_total"),
                 })}
             elif "saved" in item:
-                # Emit immediately so frontend can refresh the rule set list
                 all_saved.append(item["saved"])
                 yield {"data": json.dumps({"status": "model_complete", "result": item["saved"]})}
             elif "done" in item:
+                job_manager.complete_job(job.id, all_saved)
                 yield {"data": json.dumps({"status": "complete", "results": all_saved})}
                 return
 

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Play, AlertTriangle, Database, Info } from 'lucide-react';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { toast } from '../shared/Toast';
 import { GE_MODELS } from '../../types';
+import { jobsApi, getAuthHeaders, apiUrl } from '../../services/api';
 import { useRulesCorpusContext } from '../../contexts/RulesCorpusContext';
 import { useExtractionContext } from '../../contexts/ExtractionContext';
 
@@ -106,6 +107,85 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
     );
   };
 
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Recover running job on mount (e.g. after browser refresh) ──
+  useEffect(() => {
+    const savedJobId = sessionStorage.getItem('geo_extraction_job_id');
+    if (!savedJobId) return;
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const job = await jobsApi.get(savedJobId);
+        if (cancelled) return;
+        if (job.status === 'running') {
+          setExtracting(true);
+          setStep('extracting');
+          if (job.progress && typeof job.progress === 'object' && 'stage' in job.progress) {
+            const p = job.progress as Record<string, unknown>;
+            setProgress({
+              stage: String(p.stage ?? ''),
+              completed: Number(p.completed ?? 0),
+              total: Number(p.total ?? 1),
+              model: String(p.model ?? ''),
+              model_index: Number(p.model_index ?? 0),
+              model_total: Number(p.model_total ?? 1),
+            });
+          }
+          // Keep polling
+          pollingRef.current = setInterval(async () => {
+            try {
+              const j = await jobsApi.get(savedJobId);
+              if (j.status === 'running' && j.progress && 'stage' in j.progress) {
+                const p = j.progress as Record<string, unknown>;
+                setProgress({
+                  stage: String(p.stage ?? ''),
+                  completed: Number(p.completed ?? 0),
+                  total: Number(p.total ?? 1),
+                  model: String(p.model ?? ''),
+                  model_index: Number(p.model_index ?? 0),
+                  model_total: Number(p.model_total ?? 1),
+                });
+              } else if (j.status === 'complete') {
+                if (pollingRef.current) clearInterval(pollingRef.current);
+                sessionStorage.removeItem('geo_extraction_job_id');
+                setStep('done');
+                setExtracting(false);
+                if (Array.isArray(j.result)) setExtractionResults(j.result as ExtractionResult[]);
+                onRuleSetSaved?.();
+                toast('success', 'Rule extraction complete');
+              } else if (j.status === 'error') {
+                if (pollingRef.current) clearInterval(pollingRef.current);
+                sessionStorage.removeItem('geo_extraction_job_id');
+                setStep('config');
+                setExtracting(false);
+                toast('error', j.error || 'Extraction failed');
+              }
+            } catch {
+              // Job expired or server restarted
+              if (pollingRef.current) clearInterval(pollingRef.current);
+              sessionStorage.removeItem('geo_extraction_job_id');
+              setStep('config');
+              setExtracting(false);
+            }
+          }, 3000);
+        } else if (job.status === 'complete') {
+          sessionStorage.removeItem('geo_extraction_job_id');
+          setStep('done');
+          if (Array.isArray(job.result)) setExtractionResults(job.result as ExtractionResult[]);
+          onRuleSetSaved?.();
+        } else {
+          sessionStorage.removeItem('geo_extraction_job_id');
+        }
+      } catch {
+        sessionStorage.removeItem('geo_extraction_job_id');
+      }
+    };
+    poll();
+    return () => { cancelled = true; if (pollingRef.current) clearInterval(pollingRef.current); };
+  }, []);
+
   const handleExtract = async () => {
     if (!selectedQsId || !selectedQs) { toast('error', 'Select a query set first'); return; }
     if (!ruleSetName.trim()) { toast('error', 'Enter a name for the rule set'); return; }
@@ -118,15 +198,16 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
     setExtractionResults([]);
 
     try {
-      const response = await fetch('/api/rules/extract', {
+      const headers = await getAuthHeaders();
+      const response = await fetch(apiUrl('/api/rules/extract'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           queries: selectedQs.queries,
           engine_models: selectedModels,
           rule_set_name: ruleSetName,
           query_set_id: selectedQsId,
-          corpus_set_ids: selectedCorpusSetIds, // empty = backend auto-resolves from query_set_id
+          corpus_set_ids: selectedCorpusSetIds,
         }),
       });
 
@@ -148,7 +229,7 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
           try {
             const data = JSON.parse(line.slice(6));
             if (data.status === 'corpus_info') {
-              // Backend confirmed which corpus docs are being used
+              if (data.job_id) sessionStorage.setItem('geo_extraction_job_id', data.job_id);
             } else if (data.stage) {
               setProgress({ stage: data.stage, completed: data.completed, total: data.total, model: data.model ?? '', model_index: data.model_index ?? 0, model_total: data.model_total ?? 1 });
             } else if (data.status === 'model_complete') {
@@ -160,6 +241,7 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
                 toast('error', `${modelLabel(data.result.model)}: ${data.result.error}`);
               }
             } else if (data.status === 'complete') {
+              sessionStorage.removeItem('geo_extraction_job_id');
               setStep('done');
             } else if (data.status === 'error') {
               throw new Error(data.message);
@@ -169,6 +251,7 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
       }
     } catch (e: unknown) {
       toast('error', e instanceof Error ? e.message : 'Extraction failed');
+      sessionStorage.removeItem('geo_extraction_job_id');
       setStep('config');
     } finally {
       setExtracting(false);

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Globe, Plus, Link, FileText, CheckSquare, Square, ChevronDown, ChevronUp, Database, Pencil } from 'lucide-react';
-import { corpusApi, corpusSetApi } from '../../services/api';
+import { corpusApi, corpusSetApi, jobsApi, getAuthHeaders, apiUrl } from '../../services/api';
 import type { DiscoverResult } from '../../services/api';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { toast } from '../shared/Toast';
@@ -29,6 +29,7 @@ export function BuildCorpus({ onCorpusChanged }: Props) {
   const [showQueries, setShowQueries] = useState(false);
   const [pickedUrls, setPickedUrls] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ completed: number; total: number; added: number; failedCount: number } | null>(null);
   const [importFailures, setImportFailures] = useState<Array<{ url: string; error: string }>>([]);
 
   // Corpus set naming for the import batch
@@ -98,35 +99,149 @@ export function BuildCorpus({ onCorpusChanged }: Props) {
     setPickedUrls(pickedUrls.size === discovered.length ? new Set() : new Set(discovered.map((u) => u.url)));
   };
 
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Recover running import job on mount ──
+  useEffect(() => {
+    const savedJobId = sessionStorage.getItem('geo_corpus_import_job_id');
+    if (!savedJobId) return;
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const job = await jobsApi.get(savedJobId);
+        if (cancelled) return;
+        if (job.status === 'running') {
+          setImporting(true);
+          const p = job.progress as Record<string, number> | undefined;
+          if (p && 'completed' in p) {
+            setImportProgress({ completed: p.completed, total: p.total, added: p.added ?? 0, failedCount: p.failed_count ?? 0 });
+          }
+          pollingRef.current = setInterval(async () => {
+            try {
+              const j = await jobsApi.get(savedJobId);
+              if (j.status === 'running') {
+                const pr = j.progress as Record<string, number> | undefined;
+                if (pr && 'completed' in pr) {
+                  setImportProgress({ completed: pr.completed, total: pr.total, added: pr.added ?? 0, failedCount: pr.failed_count ?? 0 });
+                }
+              } else if (j.status === 'complete') {
+                if (pollingRef.current) clearInterval(pollingRef.current);
+                sessionStorage.removeItem('geo_corpus_import_job_id');
+                setImporting(false);
+                setImportProgress(null);
+                const result = j.result as { added?: number; failed?: Array<{ url: string; error: string }> } | null;
+                if (result?.added) toast('success', `Added ${result.added} docs to corpus`);
+                if (result?.failed?.length) setImportFailures(result.failed);
+                setDiscovered(null);
+                setPickedUrls(new Set());
+                await loadDocs();
+                reloadCorpusSets();
+                onCorpusChanged?.();
+              } else {
+                if (pollingRef.current) clearInterval(pollingRef.current);
+                sessionStorage.removeItem('geo_corpus_import_job_id');
+                setImporting(false);
+                setImportProgress(null);
+                toast('error', j.error || 'Import failed');
+              }
+            } catch {
+              if (pollingRef.current) clearInterval(pollingRef.current);
+              sessionStorage.removeItem('geo_corpus_import_job_id');
+              setImporting(false);
+              setImportProgress(null);
+            }
+          }, 3000);
+        } else if (job.status === 'complete') {
+          sessionStorage.removeItem('geo_corpus_import_job_id');
+          const result = job.result as { added?: number; failed?: Array<{ url: string; error: string }> } | null;
+          if (result?.added) toast('success', `Added ${result.added} docs to corpus`);
+          if (result?.failed?.length) setImportFailures(result.failed);
+          await loadDocs();
+          reloadCorpusSets();
+        } else {
+          sessionStorage.removeItem('geo_corpus_import_job_id');
+        }
+      } catch {
+        sessionStorage.removeItem('geo_corpus_import_job_id');
+      }
+    };
+    poll();
+    return () => { cancelled = true; if (pollingRef.current) clearInterval(pollingRef.current); };
+  }, []);
+
   const handleImport = async () => {
     if (pickedUrls.size === 0) { toast('error', 'Select at least one URL'); return; }
     setImporting(true);
     setImportFailures([]);
+    setImportProgress({ completed: 0, total: pickedUrls.size, added: 0, failedCount: 0 });
     try {
       // Create the corpus set first
       const name = corpusSetName.trim() || formatSetName(selectedQs?.name || 'Corpus');
       const newSet = await corpusSetApi.create({ name, query_set_id: selectedQsId || undefined });
 
-      const result = await corpusApi.bulkAddUrls(
-        Array.from(pickedUrls),
-        selectedQsId || undefined,
-        newSet.id,
-      );
-      if (result.added > 0) {
-        toast('success', `Added ${result.added} doc${result.added !== 1 ? 's' : ''} to corpus set "${name}"`);
+      const headers = await getAuthHeaders();
+      const response = await fetch(apiUrl('/api/corpus/bulk-add-urls'), {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          urls: Array.from(pickedUrls),
+          query_set_id: selectedQsId || undefined,
+          corpus_set_id: newSet.id,
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${response.status}`);
+      }
+      if (!response.body) throw new Error('No response body');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const failures: Array<{ url: string; error: string }> = [];
+      let totalAdded = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value);
+        for (const line of text.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.status === 'started' && data.job_id) {
+              sessionStorage.setItem('geo_corpus_import_job_id', data.job_id);
+            } else if (data.status === 'progress') {
+              setImportProgress({ completed: data.completed, total: data.total, added: data.added, failedCount: data.failed_count });
+              if (!data.success) failures.push({ url: data.url, error: data.error });
+              totalAdded = data.added;
+            } else if (data.status === 'complete') {
+              sessionStorage.removeItem('geo_corpus_import_job_id');
+              if (data.failed?.length) failures.push(...data.failed);
+            } else if (data.status === 'error') {
+              throw new Error(data.message);
+            }
+          } catch { /* skip malformed lines */ }
+        }
+      }
+
+      if (totalAdded > 0) {
+        toast('success', `Added ${totalAdded} doc${totalAdded !== 1 ? 's' : ''} to corpus set "${name}"`);
         await loadDocs();
         reloadCorpusSets();
         onCorpusChanged?.();
       }
-      if (result.failed.length > 0) setImportFailures(result.failed);
+      if (failures.length > 0) setImportFailures(failures);
       setDiscovered(null);
       setPickedUrls(new Set());
-      // Reset name for next import
       if (selectedQs) setCorpusSetName(formatSetName(selectedQs.name));
     } catch {
       toast('error', 'Import failed');
+      sessionStorage.removeItem('geo_corpus_import_job_id');
     } finally {
       setImporting(false);
+      setImportProgress(null);
     }
   };
 
@@ -269,6 +384,26 @@ export function BuildCorpus({ onCorpusChanged }: Props) {
                 {importing ? `Scraping ${pickedUrls.size}…` : `Add ${pickedUrls.size} to Corpus`}
               </button>
             </div>
+            {/* Import progress bar */}
+            {importing && importProgress && (
+              <div className="px-3 py-2 bg-primary-50 border-b border-primary-100 space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-primary-700 font-medium">
+                    Scraping URLs… {importProgress.completed}/{importProgress.total}
+                  </span>
+                  <span className="text-primary-500">
+                    {importProgress.added} added{importProgress.failedCount > 0 ? `, ${importProgress.failedCount} failed` : ''}
+                  </span>
+                </div>
+                <div className="w-full bg-primary-200 rounded-full h-1.5">
+                  <div
+                    className="bg-primary-500 h-1.5 rounded-full transition-all duration-300"
+                    style={{ width: `${Math.round((importProgress.completed / Math.max(importProgress.total, 1)) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
             <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
               {discovered.map((item) => (
                 <label key={item.url} className="flex items-start gap-2.5 px-3 py-3 hover:bg-gray-50 cursor-pointer">

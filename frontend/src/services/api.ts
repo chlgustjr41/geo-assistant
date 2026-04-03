@@ -176,3 +176,31 @@ export const adminApi = {
   removeEmail: (email: string) =>
     api.delete<{ ok: boolean; emails: string[]; error?: string }>('/api/admin/whitelist', { data: { email } }).then((r) => r.data),
 };
+
+export interface JobStatus {
+  id: string;
+  type: string;
+  status: 'running' | 'complete' | 'error';
+  progress: Record<string, unknown>;
+  result: unknown;
+  error: string | null;
+}
+
+export const jobsApi = {
+  list: () => api.get<{ jobs: JobStatus[] }>('/api/jobs').then((r) => r.data),
+  get: (id: string) => api.get<JobStatus>(`/api/jobs/${id}`).then((r) => r.data),
+};
+
+/** Get auth headers for SSE fetch calls (which bypass axios). */
+export async function getAuthHeaders(): Promise<Record<string, string>> {
+  const user = auth.currentUser;
+  if (!user) return { 'Content-Type': 'application/json' };
+  const token = await user.getIdToken();
+  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+}
+
+/** Resolve the full API URL for SSE fetch calls. */
+export function apiUrl(path: string): string {
+  const base = import.meta.env.VITE_API_BASE_URL || '';
+  return base ? `${base.replace(/\/$/, '')}${path}` : path;
+}

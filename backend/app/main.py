@@ -3,7 +3,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .database import engine, Base
 from .auth import get_current_user
-from .routers import writing, rules, settings as settings_router, corpus as corpus_router, query_sets as query_sets_router, corpus_sets as corpus_sets_router, admin as admin_router
+from .routers import writing, rules, settings as settings_router, corpus as corpus_router, query_sets as query_sets_router, corpus_sets as corpus_sets_router, admin as admin_router, jobs as jobs_router
 from .seed import seed_rule_sets
 
 # Create all tables
@@ -28,6 +28,7 @@ app.include_router(corpus_router.router, dependencies=_auth)
 app.include_router(query_sets_router.router, dependencies=_auth)
 app.include_router(corpus_sets_router.router, dependencies=_auth)
 app.include_router(admin_router.router, dependencies=_auth)  # admin endpoints have additional require_admin checks
+app.include_router(jobs_router.router, dependencies=_auth)
 
 
 @app.on_event("startup")
