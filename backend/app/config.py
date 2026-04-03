@@ -51,6 +51,15 @@ def get_default_rule_set() -> str:
     return os.getenv("DEFAULT_RULE_SET", "")
 
 
+def get_firebase_service_account_path() -> str:
+    return os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "")
+
+
+def get_allowed_emails() -> list[str]:
+    raw = os.getenv("ALLOWED_EMAILS", "")
+    return [e.strip().lower() for e in raw.split(",") if e.strip()]
+
+
 def update_env(key: str, value: str) -> None:
     """Update or insert a key in the .env file."""
     lines: list[str] = []

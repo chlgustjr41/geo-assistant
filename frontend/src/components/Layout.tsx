@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { RotateCcw } from "lucide-react";
+import { LogOut, RotateCcw } from "lucide-react";
 import { WritingAssistant } from "./WritingAssistant/WritingAssistant";
 import { RulesAndCorpus } from "./RulesAndCorpus/RulesAndCorpus";
 import { Settings } from "./Settings/Settings";
 import { ToastContainer, toast } from "./shared/Toast";
 import { settingsApi } from "../services/api";
 import { useExtractionContext } from "../contexts/ExtractionContext";
+import { useAuth } from "../contexts/AuthContext";
 import type { Tab } from "../types";
 
 interface TabDef {
@@ -35,6 +36,7 @@ export function Layout() {
   const [activeTab, setActiveTab] = useState<Tab>("writing");
   const [resetting, setResetting] = useState(false);
   const { extracting } = useExtractionContext();
+  const { user, signOut } = useAuth();
 
   const handleResetWorkspace = async () => {
     if (!confirm(
@@ -100,6 +102,16 @@ export function Layout() {
               <RotateCcw size={12} className={resetting ? 'animate-spin' : ''} />
               Reset Workspace
             </button>
+            {user && (
+              <button
+                onClick={signOut}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-400 border border-gray-200 rounded-lg hover:text-red-600 hover:border-red-300 hover:bg-red-50 transition-colors shrink-0"
+                title={`Signed in as ${user.email}`}
+              >
+                <LogOut size={12} />
+                Sign Out
+              </button>
+            )}
           </div>
         </div>
       </header>

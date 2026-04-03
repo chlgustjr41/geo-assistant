@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { auth } from '../config/firebase';
 import type {
   AppSettings,
   ScrapedArticle,
@@ -14,7 +15,31 @@ import type {
   QuerySet,
 } from '../types';
 
-const api = axios.create({ baseURL: '/' });
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/',
+});
+
+// Attach Firebase ID token to every request (when auth is configured)
+api.interceptors.request.use(async (config) => {
+  const user = auth.currentUser;
+  if (user) {
+    const token = await user.getIdToken();
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// On 401/403, sign the user out so they see the login page
+api.interceptors.response.use(
+  (res) => res,
+  async (error) => {
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      const { signOut } = await import('firebase/auth');
+      await signOut(auth).catch(() => {});
+    }
+    return Promise.reject(error);
+  },
+);
 
 export const settingsApi = {
   get: () => api.get<AppSettings>('/api/settings').then((r) => r.data),

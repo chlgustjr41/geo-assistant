@@ -12,3 +12,4 @@ pydantic>=2.0.0
 sse-starlette>=2.0.0
 aiofiles>=24.0.0
 ddgs>=1.0.0
+firebase-admin>=6.0.0
