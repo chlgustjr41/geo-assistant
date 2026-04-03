@@ -1,4 +1,6 @@
 import { useEffect } from 'react';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './lib/queryClient';
 import { Layout } from './components/Layout';
 import { LoginPage } from './components/LoginPage';
 import { AccessDeniedPage } from './components/AccessDeniedPage';
@@ -43,8 +45,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </QueryClientProvider>
   );
 }

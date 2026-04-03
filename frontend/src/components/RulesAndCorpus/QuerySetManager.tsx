@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { List, Plus, X, RefreshCw, Trash2, ChevronDown, ChevronUp, Save, Link, FileText } from 'lucide-react';
-import { rulesApi, querySetApi, writingApi, settingsApi } from '../../services/api';
+import { rulesApi, querySetApi, writingApi } from '../../services/api';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { toast } from '../shared/Toast';
 import { useRulesCorpusContext } from '../../contexts/RulesCorpusContext';
 import { useActiveJobs } from '../../contexts/ActiveJobsContext';
+import { useSettings } from '../../hooks/useSettings';
 
 interface Props {
   onQuerySetSaved?: () => void;
@@ -37,13 +38,10 @@ export function QuerySetManager({ onQuerySetSaved }: Props) {
   const [appending, setAppending] = useState(false);
   const [saving, setSaving] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [maxQueriesCap, setMaxQueriesCap] = useState<number>(50);
+  const { settings } = useSettings();
+  const maxQueriesCap = settings?.max_queries_per_set ?? 50;
 
   const newQueryRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    settingsApi.get().then((s) => setMaxQueriesCap(s.max_queries_per_set)).catch(() => {});
-  }, []);
 
   const handleScrapeUrl = async () => {
     if (!articleUrl.trim()) { toast('error', 'Enter a URL first'); return; }

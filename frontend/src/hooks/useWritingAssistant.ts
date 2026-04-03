@@ -1,22 +1,23 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { writingApi, rulesApi, jobsApi } from '../services/api';
 import type {
   ScrapedArticle,
   RewriteResponse,
   MultiGeoEvalResponse,
-  RuleSet,
-  ArticleHistoryItem,
 } from '../types';
 import { toast } from '../components/shared/Toast';
 import { useLocalStorage } from './useLocalStorage';
 import { useSessionStorage } from './useSessionStorage';
 import { useActiveJobs } from '../contexts/ActiveJobsContext';
+import { queryKeys } from '../lib/queryClient';
 
 const REWRITE_JOB_KEY = 'geo_rewrite_job_id';
 const EVAL_JOB_KEY = 'geo_eval_job_id';
 const POLL_INTERVAL = 3000;
 
 export function useWritingAssistant() {
+  const queryClient = useQueryClient();
   const [scraped, setScraped] = useState<ScrapedArticle | null>(null);
   // articleText persists across refreshes (localStorage) — losing a long article is annoying
   const [articleText, setArticleText] = useLocalStorage<string>('geo_article_text', '');
@@ -24,8 +25,14 @@ export function useWritingAssistant() {
   // original_content baseline is never stale from a previous session
   const [rewriteResult, setRewriteResult] = useSessionStorage<RewriteResponse | null>('geo_rewrite_result', null);
   const [geoResult, setGeoResult] = useSessionStorage<MultiGeoEvalResponse | null>('geo_eval_result', null);
-  const [ruleSets, setRuleSets] = useState<RuleSet[]>([]);
-  const [history, setHistory] = useState<ArticleHistoryItem[]>([]);
+  const { data: ruleSets = [] } = useQuery({
+    queryKey: queryKeys.ruleSets,
+    queryFn: rulesApi.list,
+  });
+  const { data: history = [] } = useQuery({
+    queryKey: queryKeys.articleHistory,
+    queryFn: writingApi.getHistory,
+  });
   const [currentArticleId, setCurrentArticleId] = useSessionStorage<string | null>('geo_current_article_id', null);
   const [scraping, setScraping] = useState(false);
   // Sync rewriting/evaluating state with global ActiveJobsContext so Layout can show indicators
@@ -297,26 +304,13 @@ export function useWritingAssistant() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geoResult, currentArticleId]);
 
-  const loadRuleSets = async () => {
-    try {
-      setRuleSets(await rulesApi.list());
-    } catch {
-      // silently fail
-    }
-  };
-
-  const loadHistory = async () => {
-    try {
-      setHistory(await writingApi.getHistory());
-    } catch {
-      // silently fail
-    }
-  };
+  const loadRuleSets = () => { queryClient.invalidateQueries({ queryKey: queryKeys.ruleSets }); };
+  const loadHistory = () => { queryClient.invalidateQueries({ queryKey: queryKeys.articleHistory }); };
 
   const deleteFromHistory = async (id: string) => {
     try {
       await writingApi.deleteHistory(id);
-      setHistory((prev) => prev.filter((a) => a.id !== id));
+      queryClient.invalidateQueries({ queryKey: queryKeys.articleHistory });
     } catch {
       toast('error', 'Failed to delete history item');
     }

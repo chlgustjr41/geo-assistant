@@ -1,29 +1,37 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Trash2, RefreshCw, Database, AlertTriangle, ChevronDown, ChevronUp, Pencil, Check, X, AlertCircle } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCorpus } from '../../hooks/useCorpus';
 import { corpusApi, corpusSetApi } from '../../services/api';
 import type { CorpusSet } from '../../types';
+import { queryKeys } from '../../lib/queryClient';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { toast } from '../shared/Toast';
 
 const CORPUS_MIN = 10;
 
 export function CorpusLibrary() {
+  const queryClient = useQueryClient();
   const { docs, loading, loadDocs, deleteDoc } = useCorpus();
-  const [corpusSets, setCorpusSets] = useState<CorpusSet[]>([]);
+  const { data: corpusSets = [] } = useQuery({
+    queryKey: queryKeys.corpusSets,
+    queryFn: corpusSetApi.list,
+  });
+  const { data: binaryAudit } = useQuery({
+    queryKey: queryKeys.corpusBinaryAudit,
+    queryFn: corpusApi.auditBinary,
+  });
+  const binaryDocs = binaryAudit?.documents ?? [];
+
   const [expandedSets, setExpandedSets] = useState<Set<string>>(new Set());
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const [binaryDocs, setBinaryDocs] = useState<Array<{ id: string; title: string; source_url: string | null }>>([]);
   const [purging, setPurging] = useState(false);
 
   const loadAll = () => {
     loadDocs();
-    corpusSetApi.list().then(setCorpusSets).catch(() => {});
-    corpusApi.auditBinary().then((r) => setBinaryDocs(r.documents)).catch(() => {});
+    queryClient.invalidateQueries({ queryKey: queryKeys.corpusBinaryAudit });
   };
-
-  useEffect(() => { loadAll(); }, []);
 
   const toggleSet = (id: string) => {
     setExpandedSets((prev) => {
@@ -37,7 +45,9 @@ export function CorpusLibrary() {
     if (!renameValue.trim()) return;
     try {
       await corpusSetApi.rename(id, renameValue.trim());
-      setCorpusSets((prev) => prev.map((cs) => cs.id === id ? { ...cs, name: renameValue.trim() } : cs));
+      queryClient.setQueryData(queryKeys.corpusSets, (prev: CorpusSet[] | undefined) =>
+        prev ? prev.map((cs) => cs.id === id ? { ...cs, name: renameValue.trim() } : cs) : [],
+      );
       toast('success', 'Corpus set renamed');
     } catch {
       toast('error', 'Failed to rename');
@@ -50,8 +60,8 @@ export function CorpusLibrary() {
     if (!confirm(`Delete corpus set "${name}"? All documents in this set will be permanently deleted.`)) return;
     try {
       await corpusSetApi.delete(id);
-      setCorpusSets((prev) => prev.filter((cs) => cs.id !== id));
-      loadDocs(); // refresh doc corpus_set_id values
+      queryClient.invalidateQueries({ queryKey: queryKeys.corpusSets });
+      queryClient.invalidateQueries({ queryKey: queryKeys.corpusDocs });
       toast('success', 'Corpus set deleted');
     } catch {
       toast('error', 'Failed to delete corpus set');
@@ -68,7 +78,6 @@ export function CorpusLibrary() {
     try {
       const { deleted } = await corpusApi.purgeBinary();
       toast('success', `Removed ${deleted} corrupted document${deleted !== 1 ? 's' : ''}`);
-      setBinaryDocs([]);
       loadAll();
     } catch {
       toast('error', 'Failed to purge corrupted documents');
@@ -131,7 +140,7 @@ export function CorpusLibrary() {
               className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-medium hover:bg-red-700 disabled:opacity-50"
             >
               {purging ? <LoadingSpinner size="sm" /> : <Trash2 size={12} />}
-              {purging ? 'Removing…' : `Remove ${binaryDocs.length} corrupted doc${binaryDocs.length !== 1 ? 's' : ''}`}
+              {purging ? 'Removing\u2026' : `Remove ${binaryDocs.length} corrupted doc${binaryDocs.length !== 1 ? 's' : ''}`}
             </button>
           </div>
         </div>

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle, XCircle, Save } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useSettings } from '../../hooks/useSettings';
 import { settingsApi } from '../../services/api';
+import { queryKeys } from '../../lib/queryClient';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { toast } from '../shared/Toast';
 import { GE_MODELS } from '../../types';
@@ -21,6 +23,7 @@ function ProviderStatus({ label, isSet }: { label: string; isSet: boolean }) {
 }
 
 export function Settings() {
+  const queryClient = useQueryClient();
   const { settings, loading, error, reload } = useSettings();
   const [defaultModel, setDefaultModel] = useState('');
   const [maxCorpusUrls, setMaxCorpusUrls] = useState('');
@@ -68,7 +71,7 @@ export function Settings() {
         max_queries_per_set: queriesNum && !isNaN(queriesNum) ? queriesNum : undefined,
       });
       toast('success', 'Defaults saved');
-      reload();
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings });
     } catch {
       toast('error', 'Failed to save defaults');
     } finally {

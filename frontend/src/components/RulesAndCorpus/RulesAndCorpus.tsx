@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Trash2 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { QuerySetManager } from './QuerySetManager';
 import { BuildCorpus } from './BuildCorpus';
 import { ExtractRules } from './ExtractRules';
@@ -8,6 +9,7 @@ import { CorpusLibrary } from '../Corpus/CorpusLibrary';
 import { RulesCorpusProvider, useRulesCorpusContext } from '../../contexts/RulesCorpusContext';
 import { useActiveJobs } from '../../contexts/ActiveJobsContext';
 import { settingsApi } from '../../services/api';
+import { queryKeys } from '../../lib/queryClient';
 import { toast } from '../shared/Toast';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 
@@ -34,7 +36,8 @@ const RULES_CORPUS_STORAGE_KEYS = [
 function RulesAndCorpusInner() {
   const [subtab, setSubtab] = useState<Subtab>('query-sets');
   const [purging, setPurging] = useState(false);
-  const { ruleSets, reloadRuleSets, reloadQuerySets, reloadCorpusSets } = useRulesCorpusContext();
+  const queryClient = useQueryClient();
+  const { ruleSets, reloadRuleSets } = useRulesCorpusContext();
   const { extracting, importing, generating } = useActiveJobs();
 
   // Map subtab IDs to their active-job indicator
@@ -55,9 +58,12 @@ function RulesAndCorpusInner() {
     try {
       await settingsApi.resetRulesCorpus();
       RULES_CORPUS_STORAGE_KEYS.forEach((k) => localStorage.removeItem(k));
-      reloadRuleSets();
-      reloadQuerySets();
-      reloadCorpusSets();
+      // Invalidate all data caches to reflect the reset
+      queryClient.invalidateQueries({ queryKey: queryKeys.ruleSets });
+      queryClient.invalidateQueries({ queryKey: queryKeys.querySets });
+      queryClient.invalidateQueries({ queryKey: queryKeys.corpusSets });
+      queryClient.invalidateQueries({ queryKey: queryKeys.corpusDocs });
+      queryClient.invalidateQueries({ queryKey: queryKeys.corpusBinaryAudit });
       toast('success', 'All Rules & Corpus data deleted');
     } catch {
       toast('error', 'Failed to reset');

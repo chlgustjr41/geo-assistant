@@ -39,14 +39,12 @@ export function WritingAssistant() {
     rewriteProgress, evalProgress,
     recoveredEvalConfig,
     scrapeUrl, rewrite, evaluateGeo,
-    loadRuleSets, loadHistory, deleteFromHistory,
+    deleteFromHistory,
     reset,
     currentArticleId,
   } = useWritingAssistant();
 
   const [selectedRuleSetIds, setSelectedRuleSetIds] = useLocalStorage<string[]>('geo_selected_rule_sets', []);
-
-  useEffect(() => { loadRuleSets(); loadHistory(); }, []);
 
   // Restore eval batch settings from recovered active-job config (sign-out/sign-in recovery)
   useEffect(() => {

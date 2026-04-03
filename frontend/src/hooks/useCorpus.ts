@@ -1,30 +1,33 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { corpusApi } from '../services/api';
-import type { CorpusDocument } from '../types';
+import { queryKeys } from '../lib/queryClient';
 import { toast } from '../components/shared/Toast';
 
 export function useCorpus() {
-  const [docs, setDocs] = useState<CorpusDocument[]>([]);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
 
-  const loadDocs = useCallback(async () => {
-    setLoading(true);
-    try {
-      setDocs(await corpusApi.list());
-    } catch {
-      toast('error', 'Failed to load corpus');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const { data: docs = [], isLoading: loading } = useQuery({
+    queryKey: queryKeys.corpusDocs,
+    queryFn: corpusApi.list,
+  });
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.corpusDocs });
+    queryClient.invalidateQueries({ queryKey: queryKeys.corpusSets });
+    queryClient.invalidateQueries({ queryKey: queryKeys.corpusCount });
+    queryClient.invalidateQueries({ queryKey: queryKeys.corpusBinaryAudit });
+  };
+
+  const loadDocs = () => invalidate();
 
   const addText = async (title: string, content: string, sourceUrl?: string) => {
     setAdding(true);
     try {
       await corpusApi.addText({ title, content, source_url: sourceUrl });
       toast('success', 'Document added to corpus');
-      await loadDocs();
+      invalidate();
     } catch {
       toast('error', 'Failed to add document');
     } finally {
@@ -37,7 +40,7 @@ export function useCorpus() {
     try {
       const result = await corpusApi.addUrl(url, sourceUrl, querySetId, corpusSetId);
       toast('success', `Added: ${result.title}`);
-      await loadDocs();
+      invalidate();
     } catch {
       toast('error', 'Failed to scrape and add URL');
     } finally {
@@ -48,8 +51,13 @@ export function useCorpus() {
   const deleteDoc = async (id: string) => {
     try {
       await corpusApi.delete(id);
-      setDocs((prev) => prev.filter((d) => d.id !== id));
+      queryClient.setQueryData(queryKeys.corpusDocs, (prev: typeof docs | undefined) =>
+        prev ? prev.filter((d) => d.id !== id) : [],
+      );
       toast('success', 'Document removed');
+      // Also refresh dependent caches
+      queryClient.invalidateQueries({ queryKey: queryKeys.corpusSets });
+      queryClient.invalidateQueries({ queryKey: queryKeys.corpusCount });
     } catch {
       toast('error', 'Failed to delete document');
     }
@@ -58,8 +66,12 @@ export function useCorpus() {
   const bulkDelete = async (ids: string[]) => {
     try {
       const result = await corpusApi.bulkDelete(ids);
-      setDocs((prev) => prev.filter((d) => !ids.includes(d.id)));
+      queryClient.setQueryData(queryKeys.corpusDocs, (prev: typeof docs | undefined) =>
+        prev ? prev.filter((d) => !ids.includes(d.id)) : [],
+      );
       toast('success', `Removed ${result.deleted} documents`);
+      queryClient.invalidateQueries({ queryKey: queryKeys.corpusSets });
+      queryClient.invalidateQueries({ queryKey: queryKeys.corpusCount });
     } catch {
       toast('error', 'Failed to delete documents');
     }

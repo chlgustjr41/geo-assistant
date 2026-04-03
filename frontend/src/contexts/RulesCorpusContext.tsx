@@ -1,5 +1,7 @@
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, type ReactNode } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { querySetApi, corpusSetApi, rulesApi } from '../services/api';
+import { queryKeys } from '../lib/queryClient';
 import type { QuerySet, CorpusSet, RuleSet } from '../types';
 
 interface RulesCorpusContextValue {
@@ -16,38 +18,26 @@ interface RulesCorpusContextValue {
 const RulesCorpusContext = createContext<RulesCorpusContextValue | null>(null);
 
 export function RulesCorpusProvider({ children }: { children: ReactNode }) {
-  const [querySets, setQuerySets] = useState<QuerySet[]>([]);
-  const [corpusSets, setCorpusSets] = useState<CorpusSet[]>([]);
-  const [ruleSets, setRuleSets] = useState<RuleSet[]>([]);
-  const [loadingQuerySets, setLoadingQuerySets] = useState(false);
-  const [loadingCorpusSets, setLoadingCorpusSets] = useState(false);
+  const queryClient = useQueryClient();
 
-  const reloadQuerySets = useCallback(() => {
-    setLoadingQuerySets(true);
-    querySetApi.list()
-      .then(setQuerySets)
-      .catch(() => {})
-      .finally(() => setLoadingQuerySets(false));
-  }, []);
+  const { data: querySets = [], isLoading: loadingQuerySets } = useQuery({
+    queryKey: queryKeys.querySets,
+    queryFn: querySetApi.list,
+  });
 
-  const reloadCorpusSets = useCallback(() => {
-    setLoadingCorpusSets(true);
-    corpusSetApi.list()
-      .then(setCorpusSets)
-      .catch(() => {})
-      .finally(() => setLoadingCorpusSets(false));
-  }, []);
+  const { data: corpusSets = [], isLoading: loadingCorpusSets } = useQuery({
+    queryKey: queryKeys.corpusSets,
+    queryFn: corpusSetApi.list,
+  });
 
-  const reloadRuleSets = useCallback(() => {
-    rulesApi.list().then(setRuleSets).catch(() => {});
-  }, []);
+  const { data: ruleSets = [] } = useQuery({
+    queryKey: queryKeys.ruleSets,
+    queryFn: rulesApi.list,
+  });
 
-  // Load all on mount
-  useEffect(() => {
-    reloadQuerySets();
-    reloadCorpusSets();
-    reloadRuleSets();
-  }, []);
+  const reloadQuerySets = () => queryClient.invalidateQueries({ queryKey: queryKeys.querySets });
+  const reloadCorpusSets = () => queryClient.invalidateQueries({ queryKey: queryKeys.corpusSets });
+  const reloadRuleSets = () => queryClient.invalidateQueries({ queryKey: queryKeys.ruleSets });
 
   return (
     <RulesCorpusContext.Provider value={{

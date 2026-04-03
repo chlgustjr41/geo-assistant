@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Globe, Plus, Link, FileText, CheckSquare, Square, ChevronDown, ChevronUp, Database, Pencil, X } from 'lucide-react';
-import { corpusApi, corpusSetApi, jobsApi, settingsApi, getAuthHeaders, apiUrl } from '../../services/api';
+import { corpusApi, corpusSetApi, jobsApi, getAuthHeaders, apiUrl } from '../../services/api';
 import type { DiscoverResult } from '../../services/api';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { toast } from '../shared/Toast';
 import { useCorpus } from '../../hooks/useCorpus';
+import { useSettings } from '../../hooks/useSettings';
 import { useRulesCorpusContext } from '../../contexts/RulesCorpusContext';
 import { useActiveJobs } from '../../contexts/ActiveJobsContext';
 
@@ -33,7 +34,8 @@ export function BuildCorpus({ onCorpusChanged }: Props) {
   const { importing, setImporting } = useActiveJobs();
   const [importProgress, setImportProgress] = useState<{ completed: number; total: number; added: number; failedCount: number } | null>(null);
   const [importFailures, setImportFailures] = useState<Array<{ url: string; error: string }>>([]);
-  const [maxCorpusUrlsCap, setMaxCorpusUrlsCap] = useState<number>(50);
+  const { settings } = useSettings();
+  const maxCorpusUrlsCap = settings?.max_corpus_urls ?? 50;
 
   // Corpus set naming for the import batch
   const [corpusSetName, setCorpusSetName] = useState('');
@@ -49,7 +51,6 @@ export function BuildCorpus({ onCorpusChanged }: Props) {
 
   useEffect(() => {
     loadDocs();
-    settingsApi.get().then((s) => setMaxCorpusUrlsCap(s.max_corpus_urls)).catch(() => {});
   }, []);
 
   // Auto-select first query set when list loads

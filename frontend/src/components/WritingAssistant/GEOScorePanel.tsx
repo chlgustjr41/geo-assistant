@@ -7,7 +7,6 @@ import { LoadingSpinner } from '../shared/LoadingSpinner';
 
 function modelLabel(model: string): string {
   if (!model) return 'Unknown';
-  if (model === 'combined') return 'Combined';
   const found = GE_MODELS.find((m) => m.id === model);
   if (found) return found.label;
   if (model.includes('sonnet')) return 'Claude Sonnet';
@@ -81,9 +80,12 @@ function SourceCitationCard({ citation }: { citation: SourceCitation }) {
       <div className="flex items-center justify-between px-3 py-2.5 gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <span className={`shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded ${isYours ? 'bg-primary-200 text-primary-800' : 'bg-gray-200 text-gray-600'}`}>
-            {isYours ? 'Your Article' : `Source ${citation.source_id}`}
+            Source {citation.source_id}
           </span>
-          {!isYours && <span className="text-xs text-gray-600 truncate font-medium">{citation.label}</span>}
+          {isYours
+            ? <span className="text-xs text-primary-700 font-medium shrink-0">Your Article</span>
+            : <span className="text-xs text-gray-600 truncate font-medium">{citation.label}</span>
+          }
           {!isYours && (
             citation.is_corpus
               ? <span className="flex items-center gap-0.5 text-xs text-primary-500 shrink-0"><Database size={10} />corpus</span>
@@ -208,11 +210,8 @@ function ModelResult({ result }: { result: GeoEvalResponse }) {
 
 // ── AI Response Comparison (model-tabbed) ────────────────────────────────────
 
-function AIResponseTabs({ results, combined }: { results: GeoEvalResponse[]; combined?: GeoEvalResponse }) {
-  const allEntries = [
-    ...results.filter((r) => !r.error),
-    ...(combined && !combined.error ? [combined] : []),
-  ];
+function AIResponseTabs({ results }: { results: GeoEvalResponse[] }) {
+  const allEntries = results.filter((r) => !r.error);
 
   const [activeModel, setActiveModel] = useState(allEntries[0]?.engine_model ?? '');
 
@@ -366,10 +365,7 @@ function SingleQueryPanel({ response, onReEvaluate, evaluating }: {
   onReEvaluate?: (query: string) => void;
   evaluating?: boolean;
 }) {
-  const tabs: Tab[] = [
-    ...response.results.map((r) => ({ key: r.engine_model, label: modelLabel(r.engine_model), result: r })),
-    ...(response.combined ? [{ key: 'combined', label: 'Combined Avg', result: response.combined }] : []),
-  ];
+  const tabs: Tab[] = response.results.map((r) => ({ key: r.engine_model, label: modelLabel(r.engine_model), result: r }));
   const [activeTab, setActiveTab] = useState(tabs[0]?.key ?? '');
   const activeResult = tabs.find((t) => t.key === activeTab)?.result ?? tabs[0]?.result;
 
@@ -386,7 +382,7 @@ function SingleQueryPanel({ response, onReEvaluate, evaluating }: {
       <ModelTabBar tabs={tabs} activeTab={activeTab} onSelect={setActiveTab} />
       {activeResult && <ModelResult result={activeResult} />}
       <Divider />
-      <AIResponseTabs results={response.results} combined={response.combined} />
+      <AIResponseTabs results={response.results} />
     </div>
   );
 }
@@ -404,10 +400,7 @@ function BatchQueryPanel({ response, onReEvaluate, evaluating }: {
 
   const selectedBqr = bqrs[selectedIdx];
   const tabs: Tab[] = selectedBqr
-    ? [
-        ...selectedBqr.results.map((r) => ({ key: r.engine_model, label: modelLabel(r.engine_model), result: r })),
-        ...(selectedBqr.combined ? [{ key: 'combined', label: 'Combined Avg', result: selectedBqr.combined }] : []),
-      ]
+    ? selectedBqr.results.map((r) => ({ key: r.engine_model, label: modelLabel(r.engine_model), result: r }))
     : [];
 
   const firstTabKey = tabs[0]?.key ?? '';
@@ -471,7 +464,7 @@ function BatchQueryPanel({ response, onReEvaluate, evaluating }: {
             <ModelTabBar tabs={tabs} activeTab={resolvedTab} onSelect={setActiveTab} />
             {activeResult && <ModelResult result={activeResult} />}
             <Divider />
-            <AIResponseTabs results={selectedBqr.results} combined={selectedBqr.combined} />
+            <AIResponseTabs results={selectedBqr.results} />
           </div>
         </div>
       )}
