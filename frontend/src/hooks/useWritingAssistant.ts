@@ -10,6 +10,7 @@ import type {
 import { toast } from '../components/shared/Toast';
 import { useLocalStorage } from './useLocalStorage';
 import { useSessionStorage } from './useSessionStorage';
+import { useActiveJobs } from '../contexts/ActiveJobsContext';
 
 const REWRITE_JOB_KEY = 'geo_rewrite_job_id';
 const EVAL_JOB_KEY = 'geo_eval_job_id';
@@ -27,8 +28,8 @@ export function useWritingAssistant() {
   const [history, setHistory] = useState<ArticleHistoryItem[]>([]);
   const [currentArticleId, setCurrentArticleId] = useSessionStorage<string | null>('geo_current_article_id', null);
   const [scraping, setScraping] = useState(false);
-  const [rewriting, setRewriting] = useState(false);
-  const [evaluating, setEvaluating] = useState(false);
+  // Sync rewriting/evaluating state with global ActiveJobsContext so Layout can show indicators
+  const { rewriting, setRewriting, evaluating, setEvaluating } = useActiveJobs();
   const [rewriteProgress, setRewriteProgress] = useState<Record<string, unknown> | null>(null);
   const [evalProgress, setEvalProgress] = useState<Record<string, unknown> | null>(null);
   const [recoveredEvalConfig, setRecoveredEvalConfig] = useState<Record<string, unknown> | null>(null);

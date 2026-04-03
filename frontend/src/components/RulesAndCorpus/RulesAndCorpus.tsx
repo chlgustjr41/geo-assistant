@@ -6,6 +6,7 @@ import { ExtractRules } from './ExtractRules';
 import { RuleSetManager } from '../RuleTraining/RuleSetManager';
 import { CorpusLibrary } from '../Corpus/CorpusLibrary';
 import { RulesCorpusProvider, useRulesCorpusContext } from '../../contexts/RulesCorpusContext';
+import { useActiveJobs } from '../../contexts/ActiveJobsContext';
 import { settingsApi } from '../../services/api';
 import { toast } from '../shared/Toast';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
@@ -34,6 +35,14 @@ function RulesAndCorpusInner() {
   const [subtab, setSubtab] = useState<Subtab>('query-sets');
   const [purging, setPurging] = useState(false);
   const { ruleSets, reloadRuleSets, reloadQuerySets, reloadCorpusSets } = useRulesCorpusContext();
+  const { extracting, importing, generating } = useActiveJobs();
+
+  // Map subtab IDs to their active-job indicator
+  const subtabBusy: Record<string, boolean> = {
+    'query-sets': generating,
+    'build-corpus': importing,
+    'extract-rules': extracting,
+  };
 
   const handlePurgeAll = async () => {
     if (!confirm(
@@ -65,13 +74,19 @@ function RulesAndCorpusInner() {
           <button
             key={t.id}
             onClick={() => setSubtab(t.id)}
-            className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors border-b-2 -mb-px ${
+            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-lg transition-colors border-b-2 -mb-px ${
               subtab === t.id
                 ? 'bg-white border-primary-600 text-primary-600'
                 : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'
             }`}
           >
             {t.label}
+            {subtabBusy[t.id] && (
+              <span className="inline-flex h-2 w-2 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-300 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary-400" />
+              </span>
+            )}
           </button>
         ))}
         <div className="flex-1" />

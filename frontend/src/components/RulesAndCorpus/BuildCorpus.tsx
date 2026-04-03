@@ -6,6 +6,7 @@ import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { toast } from '../shared/Toast';
 import { useCorpus } from '../../hooks/useCorpus';
 import { useRulesCorpusContext } from '../../contexts/RulesCorpusContext';
+import { useActiveJobs } from '../../contexts/ActiveJobsContext';
 
 interface Props {
   onCorpusChanged?: () => void;
@@ -28,7 +29,7 @@ export function BuildCorpus({ onCorpusChanged }: Props) {
   const [queriesUsed, setQueriesUsed] = useState<string[]>([]);
   const [showQueries, setShowQueries] = useState(false);
   const [pickedUrls, setPickedUrls] = useState<Set<string>>(new Set());
-  const [importing, setImporting] = useState(false);
+  const { importing, setImporting } = useActiveJobs();
   const [importProgress, setImportProgress] = useState<{ completed: number; total: number; added: number; failedCount: number } | null>(null);
   const [importFailures, setImportFailures] = useState<Array<{ url: string; error: string }>>([]);
 

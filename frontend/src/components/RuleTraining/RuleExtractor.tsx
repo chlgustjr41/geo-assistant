@@ -5,7 +5,7 @@ import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { toast } from '../shared/Toast';
 import { GE_MODELS } from '../../types';
 import { useLocalStorage } from '../../hooks/useLocalStorage';
-import { useExtractionContext } from '../../contexts/ExtractionContext';
+import { useExtractionContext } from '../../contexts/ActiveJobsContext';
 
 interface ProgressState {
   stage: string;

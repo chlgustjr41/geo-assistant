@@ -4,6 +4,7 @@ import { rulesApi, querySetApi, writingApi } from '../../services/api';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { toast } from '../shared/Toast';
 import { useRulesCorpusContext } from '../../contexts/RulesCorpusContext';
+import { useActiveJobs } from '../../contexts/ActiveJobsContext';
 
 interface Props {
   onQuerySetSaved?: () => void;
@@ -29,7 +30,9 @@ export function QuerySetManager({ onQuerySetSaved }: Props) {
   const [draftName, setDraftName] = useState('');
   const [numQueries, setNumQueries] = useState<number>(20);
 
-  const [generating, setGenerating] = useState(false);
+  const { setGenerating: setGlobalGenerating } = useActiveJobs();
+  const [generating, _setGenerating] = useState(false);
+  const setGenerating = (v: boolean) => { _setGenerating(v); setGlobalGenerating(v); };
   const [appending, setAppending] = useState(false);
   const [saving, setSaving] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);

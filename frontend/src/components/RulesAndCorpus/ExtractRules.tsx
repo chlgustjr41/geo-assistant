@@ -6,7 +6,7 @@ import { GE_MODELS } from '../../types';
 import { jobsApi, getAuthHeaders, apiUrl } from '../../services/api';
 import type { ActiveJobFlag } from '../../services/api';
 import { useRulesCorpusContext } from '../../contexts/RulesCorpusContext';
-import { useExtractionContext } from '../../contexts/ExtractionContext';
+import { useExtractionContext } from '../../contexts/ActiveJobsContext';
 
 interface ProgressState {
   stage: string;
@@ -289,6 +289,15 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
             } else if (data.status === 'complete') {
               sessionStorage.removeItem('geo_extraction_job_id');
               setStep('done');
+              setExtracting(false);
+              onRuleSetSaved?.();
+              toast('success', 'Rule extraction complete');
+              // Clean up persistent active-job flag
+              jobsApi.listActive().then(({ active_jobs }) => {
+                active_jobs
+                  .filter((a) => a.job_type === 'extraction')
+                  .forEach((a) => jobsApi.deleteActive(a.id).catch(() => {}));
+              }).catch(() => {});
             } else if (data.status === 'error') {
               throw new Error(data.message);
             }

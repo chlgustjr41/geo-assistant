@@ -6,7 +6,7 @@ import { Settings } from "./Settings/Settings";
 import { Admin } from "./Admin/Admin";
 import { ToastContainer, toast } from "./shared/Toast";
 import { settingsApi } from "../services/api";
-import { useExtractionContext } from "../contexts/ExtractionContext";
+import { useActiveJobs } from "../contexts/ActiveJobsContext";
 import { useAuth } from "../contexts/AuthContext";
 import type { Tab } from "../types";
 
@@ -32,7 +32,9 @@ const LOCAL_STORAGE_KEYS = [
 export function Layout() {
   const [activeTab, setActiveTab] = useState<Tab>("writing");
   const [resetting, setResetting] = useState(false);
-  const { extracting } = useExtractionContext();
+  const { extracting, importing, rewriting, evaluating, generating } = useActiveJobs();
+  const writingBusy = rewriting || evaluating;
+  const rulesBusy = extracting || importing || generating;
   const { user, signOut } = useAuth();
   const isAdmin = user?.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
 
@@ -94,7 +96,13 @@ export function Layout() {
                   }`}
                 >
                   {tab.label}
-                  {tab.id === "rules" && extracting && (
+                  {tab.id === "writing" && writingBusy && (
+                    <span className="inline-flex h-2 w-2 relative">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-300 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-primary-400" />
+                    </span>
+                  )}
+                  {tab.id === "rules" && rulesBusy && (
                     <span className="inline-flex h-2 w-2 relative">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-300 opacity-75" />
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-primary-400" />

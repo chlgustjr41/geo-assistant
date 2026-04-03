@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { Layout } from './components/Layout';
 import { LoginPage } from './components/LoginPage';
 import { AccessDeniedPage } from './components/AccessDeniedPage';
-import { ExtractionProvider } from './contexts/ExtractionContext';
+import { ActiveJobsProvider } from './contexts/ActiveJobsContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LoadingSpinner } from './components/shared/LoadingSpinner';
 import { setAccessDeniedHandler } from './services/api';
@@ -35,9 +35,9 @@ function AppContent() {
   }
 
   return (
-    <ExtractionProvider>
+    <ActiveJobsProvider>
       <Layout />
-    </ExtractionProvider>
+    </ActiveJobsProvider>
   );
 }
 
