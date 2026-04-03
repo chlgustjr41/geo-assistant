@@ -105,6 +105,7 @@ function HistoryItemDetail({ id, item, onRestore }: {
   const modelTabs: { key: string; label: string; result: GeoEvalResponse }[] = geoScores
     ? [
         ...geoScores.results.map((r) => ({ key: r.engine_model, label: modelShortName(r.engine_model), result: r })),
+        ...(geoScores.combined ? [{ key: 'combined', label: 'Combined Avg', result: geoScores.combined }] : []),
       ]
     : [];
   const resolvedScoreTab = modelTabs.find((t) => t.key === scoreModelTab) ? scoreModelTab : (modelTabs[0]?.key ?? '');

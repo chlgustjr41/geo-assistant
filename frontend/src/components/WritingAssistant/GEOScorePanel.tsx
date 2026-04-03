@@ -377,7 +377,10 @@ function SingleQueryPanel({ response, onReEvaluate, evaluating }: {
   onReEvaluate?: (query: string) => void;
   evaluating?: boolean;
 }) {
-  const tabs: Tab[] = response.results.map((r) => ({ key: r.engine_model, label: modelLabel(r.engine_model), result: r }));
+  const tabs: Tab[] = [
+    ...response.results.map((r) => ({ key: r.engine_model, label: modelLabel(r.engine_model), result: r })),
+    ...(response.combined ? [{ key: 'combined', label: 'Combined Avg', result: response.combined }] : []),
+  ];
   const [activeTab, setActiveTab] = useState(tabs[0]?.key ?? '');
   const activeResult = tabs.find((t) => t.key === activeTab)?.result ?? tabs[0]?.result;
 
@@ -412,7 +415,10 @@ function BatchQueryPanel({ response, onReEvaluate, evaluating }: {
 
   const selectedBqr = bqrs[selectedIdx];
   const tabs: Tab[] = selectedBqr
-    ? selectedBqr.results.map((r) => ({ key: r.engine_model, label: modelLabel(r.engine_model), result: r }))
+    ? [
+        ...selectedBqr.results.map((r) => ({ key: r.engine_model, label: modelLabel(r.engine_model), result: r })),
+        ...(selectedBqr.combined ? [{ key: 'combined', label: 'Combined Avg', result: selectedBqr.combined }] : []),
+      ]
     : [];
 
   const firstTabKey = tabs[0]?.key ?? '';
