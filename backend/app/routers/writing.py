@@ -312,7 +312,17 @@ async def evaluate_geo(
     q = db.query(CorpusDocument)
     if corpus_set_ids:
         q = q.filter(CorpusDocument.corpus_set_id.in_(corpus_set_ids))
-    corpus_rows = q.order_by(CorpusDocument.created_at.desc()).limit(200).all()
+    corpus_rows_raw = q.order_by(CorpusDocument.created_at.desc()).limit(200).all()
+
+    # Deduplicate by source_url when multiple corpus sets overlap
+    seen_urls: set[str] = set()
+    corpus_rows: list = []
+    for row in corpus_rows_raw:
+        key = row.source_url or row.id
+        if key not in seen_urls:
+            seen_urls.add(key)
+            corpus_rows.append(row)
+
     corpus_docs = [row.content for row in corpus_rows]
     corpus_doc_metadata = [{"source_url": row.source_url} for row in corpus_rows]
 

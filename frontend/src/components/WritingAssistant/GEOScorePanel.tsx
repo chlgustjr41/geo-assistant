@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Lightbulb, FlaskConical, Database, List, Search, RefreshCw, ExternalLink } from 'lucide-react';
+import { Lightbulb, FlaskConical, Database, List, Search, RefreshCw, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
 import type { MultiGeoEvalResponse, GeoEvalResponse, SourceCitation, QueryBatchResult } from '../../types';
 import { GE_MODELS } from '../../types';
 import { MarkdownView } from '../shared/MarkdownView';
@@ -212,8 +212,8 @@ function ModelResult({ result }: { result: GeoEvalResponse }) {
 
 function AIResponseTabs({ results }: { results: GeoEvalResponse[] }) {
   const allEntries = results.filter((r) => !r.error);
-
   const [activeModel, setActiveModel] = useState(allEntries[0]?.engine_model ?? '');
+  const [collapsed, setCollapsed] = useState(false);
 
   if (allEntries.length === 0) return null;
 
@@ -221,55 +221,67 @@ function AIResponseTabs({ results }: { results: GeoEvalResponse[] }) {
 
   return (
     <div className="space-y-3">
-      <SectionLabel>AI Response Comparison</SectionLabel>
+      <button
+        onClick={() => setCollapsed((v) => !v)}
+        className="flex items-center gap-2 group w-full"
+      >
+        <SectionLabel>AI Response Comparison</SectionLabel>
+        <span className="text-gray-400 group-hover:text-gray-600 transition-colors mb-3">
+          {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+        </span>
+      </button>
 
-      {/* Model tabs */}
-      {allEntries.length > 1 && (
-        <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5 w-fit">
-          {allEntries.map((r) => {
-            const key = r.engine_model;
-            const isActive = key === (active?.engine_model ?? '');
-            return (
-              <button
-                key={key}
-                onClick={() => setActiveModel(key)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
-                  isActive ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                {modelLabel(key)}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {!collapsed && (
+        <>
+          {/* Model tabs */}
+          {allEntries.length > 1 && (
+            <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5 w-fit">
+              {allEntries.map((r) => {
+                const key = r.engine_model;
+                const isActive = key === (active?.engine_model ?? '');
+                return (
+                  <button
+                    key={key}
+                    onClick={() => setActiveModel(key)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                      isActive ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    {modelLabel(key)}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
-      {/* Side-by-side responses */}
-      {active && (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="rounded-lg border border-gray-200 overflow-hidden">
-            <div className="px-4 py-2 bg-gray-50 border-b border-gray-200">
-              <p className="text-xs font-semibold text-gray-600">Original Version</p>
-              <p className="text-xs text-gray-400">
-                {allEntries.length > 1
-                  ? `${modelLabel(active.engine_model)} — before optimization`
-                  : 'AI response before optimization'}
-              </p>
+          {/* Side-by-side responses */}
+          {active && (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="rounded-lg border border-gray-200 overflow-hidden">
+                <div className="px-4 py-2 bg-gray-50 border-b border-gray-200">
+                  <p className="text-xs font-semibold text-gray-600">Original Version</p>
+                  <p className="text-xs text-gray-400">
+                    {allEntries.length > 1
+                      ? `${modelLabel(active.engine_model)} — before optimization`
+                      : 'AI response before optimization'}
+                  </p>
+                </div>
+                <MarkdownView content={active.ge_response_original} maxHeight="320px" className="border-0 rounded-none" />
+              </div>
+              <div className="rounded-lg border border-gray-200 overflow-hidden">
+                <div className="px-4 py-2 bg-gray-50 border-b border-gray-200">
+                  <p className="text-xs font-semibold text-gray-600">Optimized Version</p>
+                  <p className="text-xs text-gray-400">
+                    {allEntries.length > 1
+                      ? `${modelLabel(active.engine_model)} — after optimization`
+                      : 'AI response after optimization'}
+                  </p>
+                </div>
+                <MarkdownView content={active.ge_response_optimized} maxHeight="320px" className="border-0 rounded-none" />
+              </div>
             </div>
-            <MarkdownView content={active.ge_response_original} maxHeight="320px" className="border-0 rounded-none" />
-          </div>
-          <div className="rounded-lg border border-gray-200 overflow-hidden">
-            <div className="px-4 py-2 bg-gray-50 border-b border-gray-200">
-              <p className="text-xs font-semibold text-gray-600">Optimized Version</p>
-              <p className="text-xs text-gray-400">
-                {allEntries.length > 1
-                  ? `${modelLabel(active.engine_model)} — after optimization`
-                  : 'AI response after optimization'}
-              </p>
-            </div>
-            <MarkdownView content={active.ge_response_optimized} maxHeight="320px" className="border-0 rounded-none" />
-          </div>
-        </div>
+          )}
+        </>
       )}
     </div>
   );

@@ -207,12 +207,21 @@ async def extract_rules_endpoint(body: ExtractRulesRequest, db: Session = Depend
     q = db.query(CorpusDocument)
     if resolved_set_ids:
         q = q.filter(CorpusDocument.corpus_set_id.in_(resolved_set_ids))
-    corpus_rows = q.order_by(CorpusDocument.created_at.desc()).all()
+    corpus_rows_raw = q.order_by(CorpusDocument.created_at.desc()).all()
+
+    # Deduplicate by source_url (prefer newest) when multiple corpus sets overlap
+    seen_urls: set[str] = set()
+    corpus_rows: list = []
+    for row in corpus_rows_raw:
+        key = row.source_url or row.id  # fall back to id if no URL
+        if key not in seen_urls:
+            seen_urls.add(key)
+            corpus_rows.append(row)
 
     if len(corpus_rows) < MIN_CORPUS_DOCS:
         raise HTTPException(
             400,
-            f"Only {len(corpus_rows)} corpus document(s) found for this query set. "
+            f"Only {len(corpus_rows)} unique corpus document(s) found for this query set. "
             f"At least {MIN_CORPUS_DOCS} are required. "
             "Build a corpus first in the Build Corpus tab."
         )
