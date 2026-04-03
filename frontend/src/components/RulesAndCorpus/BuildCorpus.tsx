@@ -301,13 +301,15 @@ export function BuildCorpus({ onCorpusChanged }: Props) {
 
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Max results</label>
-              <select
+              <input
+                type="number"
+                min={1}
+                max={200}
                 value={maxUrls}
-                onChange={(e) => setMaxUrls(Number(e.target.value))}
+                onChange={(e) => setMaxUrls(Math.max(1, Math.min(200, Number(e.target.value) || 1)))}
                 className="w-full px-2.5 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
-              >
-                {[10, 20, 30, 50].map((n) => <option key={n} value={n}>{n} URLs</option>)}
-              </select>
+                placeholder="e.g. 20"
+              />
             </div>
           </div>
         )}
