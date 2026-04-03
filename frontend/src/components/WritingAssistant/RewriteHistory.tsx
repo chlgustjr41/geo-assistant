@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Trash2, ChevronDown, ChevronUp, BarChart2, RotateCcw, BookOpen, Database, Cpu } from 'lucide-react';
+import { Trash2, ChevronDown, ChevronUp, BarChart2, RotateCcw, BookOpen, Database, Cpu, Lightbulb } from 'lucide-react';
 import { writingApi } from '../../services/api';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import type { ArticleHistoryItem, ArticleDetail, GeoEvalResponse, MultiGeoEvalResponse, RuleSetRef } from '../../types';
@@ -105,7 +105,6 @@ function HistoryItemDetail({ id, item, onRestore }: {
   const modelTabs: { key: string; label: string; result: GeoEvalResponse }[] = geoScores
     ? [
         ...geoScores.results.map((r) => ({ key: r.engine_model, label: modelShortName(r.engine_model), result: r })),
-        ...(geoScores.combined ? [{ key: 'combined', label: 'Combined Avg', result: geoScores.combined }] : []),
       ]
     : [];
   const resolvedScoreTab = modelTabs.find((t) => t.key === scoreModelTab) ? scoreModelTab : (modelTabs[0]?.key ?? '');
@@ -214,9 +213,13 @@ function HistoryItemDetail({ id, item, onRestore }: {
                     ))}
                   </div>
                   {activeScore.score_commentary && (
-                    <p className="text-xs text-gray-600 leading-relaxed border-t border-gray-100 pt-2 mt-2">
-                      {activeScore.score_commentary.replace(/^•\s*/gm, '• ')}
-                    </p>
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-2">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <Lightbulb size={12} className="text-amber-600 shrink-0" />
+                        <p className="text-xs font-semibold text-amber-800">Why this score?</p>
+                      </div>
+                      <p className="text-xs text-amber-900 leading-relaxed whitespace-pre-line">{activeScore.score_commentary}</p>
+                    </div>
                   )}
                 </div>
               )}
