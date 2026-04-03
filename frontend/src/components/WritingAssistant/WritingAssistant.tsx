@@ -16,13 +16,19 @@ import type { CorpusSet, QuerySet, RuleSetDetail } from '../../types';
 import { rulesApi, corpusSetApi, querySetApi } from '../../services/api';
 import { queryKeys } from '../../lib/queryClient';
 
-function SectionHeader({ step, title }: { step: number; title: string }) {
+function SectionHeader({ step, title, running, runningLabel }: { step: number; title: string; running?: boolean; runningLabel?: string }) {
   return (
     <div className="flex items-center gap-3 py-1">
-      <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary-400 text-white text-xs font-bold shrink-0">
+      <span className={`flex items-center justify-center w-6 h-6 rounded-full text-white text-xs font-bold shrink-0 ${running ? 'bg-amber-500 animate-pulse' : 'bg-primary-400'}`}>
         {step}
       </span>
       <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide">{title}</h2>
+      {running && (
+        <span className="flex items-center gap-1.5 text-xs text-amber-600 font-medium shrink-0">
+          <LoadingSpinner size="sm" />
+          {runningLabel || 'Running...'}
+        </span>
+      )}
       <div className="flex-1 h-px bg-gray-200" />
     </div>
   );
@@ -153,11 +159,24 @@ export function WritingAssistant() {
     return result;
   }, [linkedQuerySetIds, allQuerySets]);
 
-  // Restore eval batch settings from recovered active-job config
+  // Restore eval settings from recovered active-job config (sign-out/refresh recovery)
   useEffect(() => {
     if (!recoveredEvalConfig) return;
     if (recoveredEvalConfig.batch_mode !== undefined) setEvalBatchMode(!!recoveredEvalConfig.batch_mode);
     if (typeof recoveredEvalConfig.batch_query_count === 'number') setEvalBatchCount(recoveredEvalConfig.batch_query_count);
+    if (recoveredEvalConfig.batch_selection === 'manual' || recoveredEvalConfig.batch_selection === 'random') {
+      setEvalBatchSelection(recoveredEvalConfig.batch_selection);
+    }
+    if (Array.isArray(recoveredEvalConfig.batch_queries) && recoveredEvalConfig.batch_queries.length > 0) {
+      setManualQueries(recoveredEvalConfig.batch_queries as string[]);
+    }
+    if (Array.isArray(recoveredEvalConfig.corpus_set_ids)) {
+      const recovered = recoveredEvalConfig.corpus_set_ids as string[];
+      // Set extra corpus IDs beyond defaults (defaults are derived from rule sets automatically)
+      // We store them so the UI shows the same corpus pool the job was started with
+      setExtraCorpusSetIds(recovered);
+      setRemovedDefaultCorpusIds([]);
+    }
   }, [recoveredEvalConfig]);
 
   useEffect(() => {
@@ -199,7 +218,7 @@ export function WritingAssistant() {
     <div className="space-y-5">
 
       {/* ── Step 1: Configure & Optimize ──────────────────────────────── */}
-      <SectionHeader step={1} title="Configure & Optimize" />
+      <SectionHeader step={1} title="Configure & Optimize" running={rewriting} runningLabel="Optimizing..." />
 
       <ArticleInput
         onTextChange={setArticleText}
@@ -314,7 +333,17 @@ export function WritingAssistant() {
 
           {/* ── GEO Evaluation Config ────────────────────────────────── */}
           <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-4">
-            <h3 className="text-sm font-semibold text-gray-700">GEO Evaluation</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-gray-700">GEO Evaluation</h3>
+              {evaluating && (
+                <span className="flex items-center gap-1.5 text-xs text-amber-600 font-medium">
+                  <LoadingSpinner size="sm" />
+                  {evalProgress?.total && Number(evalProgress.total) > 1
+                    ? `${evalProgress.completed ?? 0}/${evalProgress.total} queries`
+                    : 'Running...'}
+                </span>
+              )}
+            </div>
             <p className="text-xs text-gray-500">
               Uses your Corpus documents as competition (or synthetic fallback if corpus has fewer than 10 docs).
               Evaluated by a neutral AI engine.
@@ -503,7 +532,11 @@ export function WritingAssistant() {
       {geoResult && (
         <>
           {/* ── Step 3: GEO Evaluation Results ────────────────────────── */}
-          <SectionHeader step={3} title="GEO Evaluation Results" />
+          <SectionHeader step={3} title="GEO Evaluation Results" running={evaluating} runningLabel={
+            evalProgress?.total && Number(evalProgress.total) > 1
+              ? `Evaluating ${evalProgress.completed ?? 0}/${evalProgress.total}...`
+              : 'Evaluating...'
+          } />
 
           <GEOScorePanel
             response={geoResult}

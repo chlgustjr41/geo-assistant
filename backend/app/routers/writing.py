@@ -384,8 +384,11 @@ async def evaluate_geo(
             "batch_mode": body.batch_mode,
             "query_count": total_queries,
             "batch_query_count": body.batch_query_count,
+            "batch_queries": body.batch_queries,
+            "batch_selection": "manual" if (body.batch_queries and len(body.batch_queries) > 0) else "random",
             "test_query": body.test_query,
             "rule_set_ids": body.rule_set_ids,
+            "corpus_set_ids": body.corpus_set_ids if body.corpus_set_ids is not None else corpus_set_ids,
         }),
     )
     db.add(active_flag)
