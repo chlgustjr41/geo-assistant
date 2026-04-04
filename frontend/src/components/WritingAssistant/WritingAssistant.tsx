@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Copy, BarChart2, RotateCcw, ChevronDown, ChevronUp, Clock, Database, X, Search } from 'lucide-react';
+import { Copy, BarChart2, RotateCcw, ChevronDown, ChevronUp, Clock, Database, X, Search, Shuffle } from 'lucide-react';
 import { ArticleInput } from './ArticleInput';
 import { ConfigPanel } from './ConfigPanel';
 import { SideBySideView } from './SideBySideView';
@@ -37,7 +37,7 @@ function SectionHeader({ step, title, running, runningLabel }: { step: number; t
 export function WritingAssistant() {
   const [showAllRules, setShowAllRules] = useState(false);
   const [evalBatchMode, setEvalBatchMode] = useState(false);
-  const [evalBatchSelection, setEvalBatchSelection] = useState<'random' | 'manual'>('random');
+  const [randomSelection, setRandomSelection] = useState(true);
   const [evalBatchCount, setEvalBatchCount] = useState<number>(5);
   const [manualQueries, setManualQueries] = useState<string[]>([]);
   const [historyOpen, setHistoryOpen] = useState(true);
@@ -52,7 +52,7 @@ export function WritingAssistant() {
     recoveredEvalConfig,
     scrapeUrl, rewrite, evaluateGeo,
     deleteFromHistory,
-    reset,
+    reset, restoreFromHistory,
     currentArticleId,
   } = useWritingAssistant();
 
@@ -68,7 +68,7 @@ export function WritingAssistant() {
     queryFn: querySetApi.list,
   });
 
-  // Derive default corpus set IDs and query set IDs from selected rule sets
+  // Derive default corpus set IDs and linked query sets from selected rule sets
   const [ruleSetDetails, setRuleSetDetails] = useState<Record<string, RuleSetDetail>>({});
   useEffect(() => {
     let cancelled = false;
@@ -110,6 +110,21 @@ export function WritingAssistant() {
     return ids;
   }, [selectedRuleSetIds, ruleSetDetails]);
 
+  // Available queries from linked query sets for manual selection
+  const availableQueries = useMemo(() => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const qsId of linkedQuerySetIds) {
+      const qs = allQuerySets.find((q) => q.id === qsId);
+      if (qs) {
+        for (const q of qs.queries) {
+          if (!seen.has(q)) { seen.add(q); result.push(q); }
+        }
+      }
+    }
+    return result;
+  }, [linkedQuerySetIds, allQuerySets]);
+
   // Corpus set IDs for evaluation = defaults + user additions
   const [extraCorpusSetIds, setExtraCorpusSetIds] = useLocalStorage<string[]>('geo_extra_corpus_ids', []);
   const [removedDefaultCorpusIds, setRemovedDefaultCorpusIds] = useLocalStorage<string[]>('geo_removed_default_corpus_ids', []);
@@ -144,36 +159,17 @@ export function WritingAssistant() {
     setRemovedDefaultCorpusIds([]);
   }, [selectedRuleSetIds.join(',')]);
 
-  // Available queries from linked query sets for manual selection
-  const availableQueries = useMemo(() => {
-    const seen = new Set<string>();
-    const result: string[] = [];
-    for (const qsId of linkedQuerySetIds) {
-      const qs = allQuerySets.find((q) => q.id === qsId);
-      if (qs) {
-        for (const q of qs.queries) {
-          if (!seen.has(q)) { seen.add(q); result.push(q); }
-        }
-      }
-    }
-    return result;
-  }, [linkedQuerySetIds, allQuerySets]);
-
   // Restore eval settings from recovered active-job config (sign-out/refresh recovery)
   useEffect(() => {
     if (!recoveredEvalConfig) return;
     if (recoveredEvalConfig.batch_mode !== undefined) setEvalBatchMode(!!recoveredEvalConfig.batch_mode);
     if (typeof recoveredEvalConfig.batch_query_count === 'number') setEvalBatchCount(recoveredEvalConfig.batch_query_count);
-    if (recoveredEvalConfig.batch_selection === 'manual' || recoveredEvalConfig.batch_selection === 'random') {
-      setEvalBatchSelection(recoveredEvalConfig.batch_selection);
-    }
+    if (recoveredEvalConfig.random_selection !== undefined) setRandomSelection(!!recoveredEvalConfig.random_selection);
     if (Array.isArray(recoveredEvalConfig.batch_queries) && recoveredEvalConfig.batch_queries.length > 0) {
       setManualQueries(recoveredEvalConfig.batch_queries as string[]);
     }
     if (Array.isArray(recoveredEvalConfig.corpus_set_ids)) {
       const recovered = recoveredEvalConfig.corpus_set_ids as string[];
-      // Set extra corpus IDs beyond defaults (defaults are derived from rule sets automatically)
-      // We store them so the UI shows the same corpus pool the job was started with
       setExtraCorpusSetIds(recovered);
       setRemovedDefaultCorpusIds([]);
     }
@@ -200,16 +196,15 @@ export function WritingAssistant() {
   };
 
   const handleEvaluate = useCallback((testQuery?: string) => {
-    const isManualBatch = evalBatchMode && evalBatchSelection === 'manual';
     evaluateGeo({
       testQuery,
       ruleSetIds: selectedRuleSetIds,
       batchMode: evalBatchMode,
-      batchQueryCount: evalBatchMode && evalBatchSelection === 'random' ? evalBatchCount : undefined,
-      batchQueries: isManualBatch ? manualQueries : undefined,
+      batchQueryCount: evalBatchMode && randomSelection ? evalBatchCount : undefined,
+      batchQueries: evalBatchMode && !randomSelection ? manualQueries : undefined,
       corpusSetIds: evalCorpusSetIds.length > 0 ? evalCorpusSetIds : undefined,
     });
-  }, [evaluateGeo, selectedRuleSetIds, evalBatchMode, evalBatchSelection, evalBatchCount, manualQueries, evalCorpusSetIds]);
+  }, [evaluateGeo, selectedRuleSetIds, evalBatchMode, randomSelection, evalBatchCount, manualQueries, evalCorpusSetIds]);
 
   void scraped;
   void currentArticleId;
@@ -420,27 +415,25 @@ export function WritingAssistant() {
                   Batch mode runs one GE simulation per query and may take longer and cost more.
                 </p>
 
-                {/* Random vs Manual selection */}
-                <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5 w-fit">
-                  <button
-                    onClick={() => setEvalBatchSelection('random')}
-                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                      evalBatchSelection === 'random' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
+                {/* Random Selection Toggle */}
+                <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                  <span className="relative">
+                    <input
+                      type="checkbox"
+                      checked={randomSelection}
+                      onChange={() => setRandomSelection((v) => !v)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-gray-300 rounded-full peer-checked:bg-primary-400 transition-colors" />
+                    <div className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform peer-checked:translate-x-4" />
+                  </span>
+                  <span className="flex items-center gap-1.5 text-xs font-medium text-gray-700">
+                    <Shuffle size={12} />
                     Random Selection
-                  </button>
-                  <button
-                    onClick={() => setEvalBatchSelection('manual')}
-                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                      evalBatchSelection === 'manual' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    Manual Selection
-                  </button>
-                </div>
+                  </span>
+                </label>
 
-                {evalBatchSelection === 'random' && (
+                {randomSelection ? (
                   <div className="flex items-center gap-2">
                     <label className="text-xs text-gray-600 shrink-0">Randomly select</label>
                     <input
@@ -453,9 +446,7 @@ export function WritingAssistant() {
                     />
                     <span className="text-xs text-gray-600">queries from the query set</span>
                   </div>
-                )}
-
-                {evalBatchSelection === 'manual' && (
+                ) : (
                   <div className="space-y-2">
                     {availableQueries.length === 0 ? (
                       <p className="text-xs text-gray-400 italic">
@@ -511,7 +502,7 @@ export function WritingAssistant() {
 
             <button
               onClick={() => handleEvaluate()}
-              disabled={evaluating || (evalBatchMode && evalBatchSelection === 'manual' && manualQueries.length === 0)}
+              disabled={evaluating || (evalBatchMode && !randomSelection && manualQueries.length === 0)}
               className="flex items-center gap-2 px-4 py-2 bg-primary-400 text-white rounded-lg text-sm font-medium hover:bg-primary-500 disabled:opacity-50 transition-colors"
             >
               {evaluating ? <LoadingSpinner size="sm" /> : <BarChart2 size={14} />}
@@ -520,9 +511,9 @@ export function WritingAssistant() {
                     ? `Evaluating... ${evalProgress.completed ?? 0}/${evalProgress.total} queries`
                     : 'Evaluating...')
                 : evalBatchMode
-                  ? evalBatchSelection === 'manual'
-                    ? `Run Batch GEO Evaluation (${manualQueries.length})`
-                    : `Run Batch GEO Evaluation (${evalBatchCount})`
+                  ? randomSelection
+                    ? `Run Batch GEO Evaluation (${evalBatchCount})`
+                    : `Run Batch GEO Evaluation (${manualQueries.length})`
                   : 'Run GEO Evaluation'}
             </button>
           </div>
@@ -567,9 +558,15 @@ export function WritingAssistant() {
               history={history}
               onDelete={deleteFromHistory}
               onRestore={(detail) => {
-                setArticleText(detail.original_content);
-                reset();
-                setArticleText(detail.original_content);
+                restoreFromHistory(detail);
+                // Sync selected rule set IDs with the restored article's rule sets
+                const restoredIds = detail.rule_sets.map((rs) => rs.id).filter(Boolean);
+                if (restoredIds.length > 0) {
+                  setSelectedRuleSetIds(restoredIds);
+                }
+                // Scroll to top so user sees the restored content
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                toast('success', 'Restored from history');
               }}
             />
           )}

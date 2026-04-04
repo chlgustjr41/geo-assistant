@@ -5,6 +5,7 @@ import type {
   ScrapedArticle,
   RewriteResponse,
   MultiGeoEvalResponse,
+  ArticleDetail,
 } from '../types';
 import { toast } from '../components/shared/Toast';
 import { useLocalStorage } from './useLocalStorage';
@@ -345,6 +346,51 @@ export function useWritingAssistant() {
     sessionStorage.removeItem('geo_rewrite_meta');
   };
 
+  /** Restore full state from a saved history item. */
+  const restoreFromHistory = (detail: ArticleDetail) => {
+    // Stop any in-flight jobs
+    if (rewriteTimerRef.current) { clearInterval(rewriteTimerRef.current); rewriteTimerRef.current = null; }
+    if (evalTimerRef.current) { clearInterval(evalTimerRef.current); evalTimerRef.current = null; }
+    sessionStorage.removeItem(REWRITE_JOB_KEY);
+    sessionStorage.removeItem(EVAL_JOB_KEY);
+    sessionStorage.removeItem('geo_rewrite_meta');
+    setRewriting(false);
+    setEvaluating(false);
+    setRewriteProgress(null);
+    setEvalProgress(null);
+    setScraped(null);
+
+    // Restore article text
+    setArticleText(detail.original_content);
+
+    // Restore rewrite result if the article was optimized
+    if (detail.rewritten_content) {
+      const ruleSetIds = detail.rule_sets.map((rs) => rs.id).filter(Boolean);
+      setRewriteResult({
+        original_content: detail.original_content,
+        rewritten_content: detail.rewritten_content,
+        model_used: detail.model_used,
+        rules_applied: [], // rules not stored in history detail
+        trend_keywords_injected: detail.trend_keywords ?? [],
+        rule_set_ids: ruleSetIds.length > 0 ? ruleSetIds : (detail.rule_set_id ? [detail.rule_set_id] : []),
+      });
+
+      // Restore selected rule set IDs in localStorage so ConfigPanel picks them up
+      const idsToRestore = ruleSetIds.length > 0 ? ruleSetIds : (detail.rule_set_id ? [detail.rule_set_id] : []);
+      if (idsToRestore.length > 0) {
+        localStorage.setItem('geo_selected_rule_sets', JSON.stringify(idsToRestore));
+      }
+    } else {
+      setRewriteResult(null);
+    }
+
+    // Restore GEO scores
+    setGeoResult(detail.geo_scores ?? null);
+
+    // Track this as the current article
+    setCurrentArticleId(detail.id);
+  };
+
   return {
     scraped, articleText, setArticleText,
     rewriteResult, geoResult,
@@ -354,7 +400,7 @@ export function useWritingAssistant() {
     recoveredEvalConfig,
     scrapeUrl, rewrite, evaluateGeo,
     loadRuleSets, loadHistory, deleteFromHistory,
-    reset,
+    reset, restoreFromHistory,
     currentArticleId,
   };
 }

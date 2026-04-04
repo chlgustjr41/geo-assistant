@@ -18,6 +18,7 @@ interface TabDef {
 }
 
 // localStorage keys used by the app (cleared on workspace reset)
+// Keep in sync with APP_LOCAL_STORAGE_KEYS in AuthContext.tsx.
 const LOCAL_STORAGE_KEYS = [
   'geo_article_text',
   'geo_selected_rule_sets',
@@ -27,6 +28,8 @@ const LOCAL_STORAGE_KEYS = [
   'geo_extractor_models',
   'geo_extractor_results',
   'geo_extractor_use_corpus',
+  'geo_extra_corpus_ids',
+  'geo_removed_default_corpus_ids',
 ];
 
 export function Layout() {

@@ -287,8 +287,8 @@ class EvaluateGeoRequest(BaseModel):
     rules_applied: list[str] = []
     rule_set_ids: list[str] = []
     batch_mode: bool = False
-    batch_query_count: int | None = None  # if set, randomly sample this many from the query set
-    batch_queries: list[str] | None = None  # explicit list of queries (manual selection)
+    batch_query_count: int | None = None  # random mode: sample this many from query set
+    batch_queries: list[str] | None = None  # manual mode: explicit list of queries
     corpus_set_ids: list[str] | None = None  # explicit corpus set override; None = derive from rule sets
 
 
@@ -338,7 +338,7 @@ async def evaluate_geo(
     batch_queries: list[str] | None = None
     if body.batch_mode:
         if body.batch_queries and len(body.batch_queries) > 0:
-            # Explicit manual selection from frontend
+            # Manual selection: use the explicit list from the frontend
             batch_queries = body.batch_queries[:30]
         else:
             # Random selection from linked query sets
@@ -385,7 +385,7 @@ async def evaluate_geo(
             "query_count": total_queries,
             "batch_query_count": body.batch_query_count,
             "batch_queries": body.batch_queries,
-            "batch_selection": "manual" if (body.batch_queries and len(body.batch_queries) > 0) else "random",
+            "random_selection": not (body.batch_queries and len(body.batch_queries) > 0),
             "test_query": body.test_query,
             "rule_set_ids": body.rule_set_ids,
             "corpus_set_ids": body.corpus_set_ids if body.corpus_set_ids is not None else corpus_set_ids,

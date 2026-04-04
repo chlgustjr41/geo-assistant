@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Trash2, ChevronDown, ChevronUp, BarChart2, RotateCcw, BookOpen, Database, Cpu, Lightbulb } from 'lucide-react';
+import { Trash2, ChevronDown, ChevronUp, BarChart2, RotateCcw, BookOpen, Database, Cpu, Lightbulb, Search } from 'lucide-react';
 import { writingApi } from '../../services/api';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import type { ArticleHistoryItem, ArticleDetail, GeoEvalResponse, MultiGeoEvalResponse, RuleSetRef } from '../../types';
@@ -176,6 +176,31 @@ function HistoryItemDetail({ id, item, onRestore }: {
         {tab === 'scores' && (
           geoScores && modelTabs.length > 0 ? (
             <div className="divide-y divide-gray-100">
+              {/* Test query used */}
+              <div className="px-3 pt-3 pb-2 space-y-1.5">
+                {geoScores.is_batch && geoScores.batch_query_results && geoScores.batch_query_results.length > 0 ? (
+                  <>
+                    <p className="text-xs font-medium text-gray-600 flex items-center gap-1.5">
+                      <Search size={10} className="text-gray-400" />
+                      Batch queries ({geoScores.batch_query_results.length})
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {geoScores.batch_query_results.map((bq, i) => (
+                        <span key={i} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
+                          {bq.query}
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                ) : geoScores.test_query_used ? (
+                  <p className="text-xs text-gray-600 flex items-center gap-1.5">
+                    <Search size={10} className="text-gray-400 shrink-0" />
+                    <span className="font-medium text-gray-500">Query:</span>
+                    <span className="italic">{geoScores.test_query_used}</span>
+                  </p>
+                ) : null}
+              </div>
+
               {/* Model tab bar */}
               {modelTabs.length > 1 && (
                 <div className="flex gap-0.5 overflow-x-auto px-2 pt-2">
