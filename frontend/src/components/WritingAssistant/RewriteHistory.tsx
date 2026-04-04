@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Trash2, ChevronDown, ChevronUp, BarChart2, RotateCcw, BookOpen, Database, Cpu, Lightbulb, Search } from 'lucide-react';
 import { writingApi } from '../../services/api';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
-import type { ArticleHistoryItem, ArticleDetail, GeoEvalResponse, MultiGeoEvalResponse, RuleSetRef } from '../../types';
+import type { ArticleHistoryItem, ArticleDetail, GeoEvalResponse, MultiGeoEvalResponse, RuleSetRef, QueryBatchResult } from '../../types';
 
 interface Props {
   history: ArticleHistoryItem[];
@@ -80,6 +80,7 @@ function HistoryItemDetail({ id, item, onRestore }: {
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<'original' | 'rewritten' | 'scores'>('rewritten');
   const [scoreModelTab, setScoreModelTab] = useState<string>('');
+  const [batchQueryIdx, setBatchQueryIdx] = useState<number | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -108,8 +109,7 @@ function HistoryItemDetail({ id, item, onRestore }: {
         ...(geoScores.combined ? [{ key: 'combined', label: 'Combined Avg', result: geoScores.combined }] : []),
       ]
     : [];
-  const resolvedScoreTab = modelTabs.find((t) => t.key === scoreModelTab) ? scoreModelTab : (modelTabs[0]?.key ?? '');
-  const activeScore = modelTabs.find((t) => t.key === resolvedScoreTab)?.result ?? null;
+  // Note: resolvedScoreTab/activeScore are computed inside the batch-aware IIFE in the scores tab
 
   const corpusLabel = detail.corpus_set_names.length > 0
     ? detail.corpus_set_names.join(', ')
@@ -184,12 +184,32 @@ function HistoryItemDetail({ id, item, onRestore }: {
                       <Search size={10} className="text-gray-400" />
                       Batch queries ({geoScores.batch_query_results.length})
                     </p>
+                    {/* Clickable query list for batch drill-down */}
                     <div className="flex flex-wrap gap-1">
-                      {geoScores.batch_query_results.map((bq, i) => (
-                        <span key={i} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
-                          {bq.query}
-                        </span>
-                      ))}
+                      <button
+                        onClick={() => { setBatchQueryIdx(null); setScoreModelTab(''); }}
+                        className={`text-xs px-2 py-0.5 rounded transition-colors ${batchQueryIdx === null ? 'bg-primary-200 text-primary-800 font-medium' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                      >
+                        All (avg)
+                      </button>
+                      {geoScores.batch_query_results.map((bq: QueryBatchResult, i: number) => {
+                        const rep = bq.combined ?? bq.results[0];
+                        const pct = rep && !rep.error ? rep.improvement.overall_pct : null;
+                        return (
+                          <button
+                            key={i}
+                            onClick={() => { setBatchQueryIdx(i); setScoreModelTab(''); }}
+                            className={`text-xs px-2 py-0.5 rounded transition-colors flex items-center gap-1 ${batchQueryIdx === i ? 'bg-primary-200 text-primary-800 font-medium' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                          >
+                            <span className="truncate max-w-[150px]">{bq.query}</span>
+                            {pct !== null && (
+                              <span className={`text-xs font-semibold shrink-0 ${pct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                {pct >= 0 ? '+' : ''}{pct.toFixed(1)}%
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
                   </>
                 ) : geoScores.test_query_used ? (
@@ -201,62 +221,90 @@ function HistoryItemDetail({ id, item, onRestore }: {
                 ) : null}
               </div>
 
-              {/* Model tab bar */}
-              {modelTabs.length > 1 && (
-                <div className="flex gap-0.5 overflow-x-auto px-2 pt-2">
-                  {modelTabs.map((t) => (
-                    <button
-                      key={t.key}
-                      onClick={() => setScoreModelTab(t.key)}
-                      className={`px-3 py-1 text-xs font-medium whitespace-nowrap rounded transition-colors shrink-0 ${
-                        resolvedScoreTab === t.key
-                          ? 'bg-primary-100 text-primary-700 font-semibold'
-                          : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
-                      }`}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {/* Score grid for active model */}
-              {activeScore && !activeScore.error && (
-                <div className="p-3 space-y-2">
-                  <div className="grid grid-cols-4 gap-2">
-                    {[
-                      { label: 'Word', before: activeScore.original_scores.word, after: activeScore.optimized_scores.word, pct: activeScore.improvement.word_pct },
-                      { label: 'Position', before: activeScore.original_scores.pos, after: activeScore.optimized_scores.pos, pct: activeScore.improvement.pos_pct },
-                      { label: 'Overall', before: activeScore.original_scores.overall, after: activeScore.optimized_scores.overall, pct: activeScore.improvement.overall_pct },
-                      { label: 'GEU', before: activeScore.original_scores.geu ?? 0, after: activeScore.optimized_scores.geu ?? 0, pct: activeScore.improvement.geu_pct ?? 0 },
-                    ].map(({ label, before, after, pct }) => (
-                      <div key={label} className="bg-gray-50 rounded p-2 text-center">
-                        <p className="text-xs text-gray-500 mb-1">{label}</p>
-                        <p className="text-sm font-bold text-gray-800">{before.toFixed(1)} → {after.toFixed(1)}</p>
-                        <p className={`text-xs font-semibold ${pct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                          {pct >= 0 ? '+' : ''}{pct.toFixed(1)}%
+              {/* Resolve which scores to show: aggregate or per-query */}
+              {(() => {
+                const bqr: QueryBatchResult | null = batchQueryIdx !== null && geoScores.batch_query_results ? geoScores.batch_query_results[batchQueryIdx] ?? null : null;
+                const displayTabs = bqr
+                  ? [
+                      ...bqr.results.map((r) => ({ key: r.engine_model, label: modelShortName(r.engine_model), result: r })),
+                      ...(bqr.combined ? [{ key: 'combined', label: 'Combined Avg', result: bqr.combined }] : []),
+                    ]
+                  : modelTabs;
+                const resolvedTab = displayTabs.find((t) => t.key === scoreModelTab) ? scoreModelTab : (displayTabs[0]?.key ?? '');
+                const displayScore = displayTabs.find((t) => t.key === resolvedTab)?.result ?? null;
+
+                return (
+                  <>
+                    {/* Per-query header */}
+                    {bqr && (
+                      <div className="px-3 py-2 bg-primary-50 border-b border-primary-100">
+                        <p className="text-xs text-primary-700">
+                          <span className="font-medium">Query {(batchQueryIdx ?? 0) + 1}:</span>{' '}
+                          <span className="italic">&ldquo;{bqr.query}&rdquo;</span>
                         </p>
                       </div>
-                    ))}
-                  </div>
-                  {activeScore.score_commentary && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-2">
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <Lightbulb size={12} className="text-amber-600 shrink-0" />
-                        <p className="text-xs font-semibold text-amber-800">Why this score?</p>
+                    )}
+
+                    {/* Model tab bar */}
+                    {displayTabs.length > 1 && (
+                      <div className="flex gap-0.5 overflow-x-auto px-2 pt-2">
+                        {displayTabs.map((t) => (
+                          <button
+                            key={t.key}
+                            onClick={() => setScoreModelTab(t.key)}
+                            className={`px-3 py-1 text-xs font-medium whitespace-nowrap rounded transition-colors shrink-0 ${
+                              resolvedTab === t.key
+                                ? 'bg-primary-100 text-primary-700 font-semibold'
+                                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                            }`}
+                          >
+                            {t.label}
+                          </button>
+                        ))}
                       </div>
-                      <p className="text-xs text-amber-900 leading-relaxed whitespace-pre-line">{activeScore.score_commentary}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-              {activeScore?.error && (
-                <p className="p-3 text-xs text-red-500">{activeScore.error}</p>
-              )}
-              {geoScores.is_batch && (
-                <p className="px-3 py-2 text-xs text-gray-400 italic">
-                  Batch evaluation — showing combined average across {geoScores.batch_query_results?.length ?? '?'} queries.
-                </p>
-              )}
+                    )}
+
+                    {/* Score grid */}
+                    {displayScore && !displayScore.error && (
+                      <div className="p-3 space-y-2">
+                        <div className="grid grid-cols-4 gap-2">
+                          {[
+                            { label: 'Word', before: displayScore.original_scores.word, after: displayScore.optimized_scores.word, pct: displayScore.improvement.word_pct },
+                            { label: 'Position', before: displayScore.original_scores.pos, after: displayScore.optimized_scores.pos, pct: displayScore.improvement.pos_pct },
+                            { label: 'Overall', before: displayScore.original_scores.overall, after: displayScore.optimized_scores.overall, pct: displayScore.improvement.overall_pct },
+                            { label: 'GEU', before: displayScore.original_scores.geu ?? 0, after: displayScore.optimized_scores.geu ?? 0, pct: displayScore.improvement.geu_pct ?? 0 },
+                          ].map(({ label, before, after, pct }) => (
+                            <div key={label} className="bg-gray-50 rounded p-2 text-center">
+                              <p className="text-xs text-gray-500 mb-1">{label}</p>
+                              <p className="text-sm font-bold text-gray-800">{before.toFixed(1)} → {after.toFixed(1)}</p>
+                              <p className={`text-xs font-semibold ${pct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                {pct >= 0 ? '+' : ''}{pct.toFixed(1)}%
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                        {displayScore.score_commentary && (
+                          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-2">
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <Lightbulb size={12} className="text-amber-600 shrink-0" />
+                              <p className="text-xs font-semibold text-amber-800">Why this score?</p>
+                            </div>
+                            <p className="text-xs text-amber-900 leading-relaxed whitespace-pre-line">{displayScore.score_commentary}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {displayScore?.error && (
+                      <p className="p-3 text-xs text-red-500">{displayScore.error}</p>
+                    )}
+                    {geoScores.is_batch && batchQueryIdx === null && (
+                      <p className="px-3 py-2 text-xs text-gray-400 italic">
+                        Batch evaluation — showing combined average across {geoScores.batch_query_results?.length ?? '?'} queries. Click a query above to see individual results.
+                      </p>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           ) : (
             <p className="p-3 text-xs text-gray-400 italic">No GEO evaluation recorded for this optimization.</p>

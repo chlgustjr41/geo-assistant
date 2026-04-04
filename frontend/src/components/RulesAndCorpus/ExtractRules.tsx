@@ -241,6 +241,7 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
     setProgress(null);
     setExtractionResults([]);
 
+    let collectedResults: ExtractionResult[] = [];
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(apiUrl('/api/rules/extract'), {
@@ -264,6 +265,7 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
 
+      let streamCompleted = false;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -279,6 +281,7 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
             } else if (data.stage) {
               setProgress({ stage: data.stage, completed: data.completed, total: data.total, model: data.model ?? '', model_index: data.model_index ?? 0, model_total: data.model_total ?? 1 });
             } else if (data.status === 'model_complete') {
+              collectedResults = [...collectedResults, data.result];
               setExtractionResults((prev) => [...prev, data.result]);
               if (!data.result.error) {
                 toast('success', `Saved: ${modelLabel(data.result.model)} — ${data.result.num_rules} rules`);
@@ -287,6 +290,7 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
                 toast('error', `${modelLabel(data.result.model)}: ${data.result.error}`);
               }
             } else if (data.status === 'complete') {
+              streamCompleted = true;
               sessionStorage.removeItem('geo_extraction_job_id');
               setStep('done');
               setExtracting(false);
@@ -299,9 +303,30 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
                   .forEach((a) => jobsApi.deleteActive(a.id).catch(() => {}));
               }).catch(() => {});
             } else if (data.status === 'error') {
-              throw new Error(data.message);
+              // Surface server-side errors to the outer catch
+              const serverErr = new Error(data.message);
+              (serverErr as unknown as Record<string, boolean>).__serverError = true;
+              throw serverErr;
             }
-          } catch { /* skip malformed SSE lines */ }
+          } catch (lineErr) {
+            // Re-throw intentional server errors; skip malformed SSE lines
+            if (lineErr instanceof Error && (lineErr as unknown as Record<string, boolean>).__serverError) throw lineErr;
+          }
+        }
+      }
+      // Stream ended — if 'complete' event was missed, fall back to polling
+      if (!streamCompleted) {
+        const savedJobId = sessionStorage.getItem('geo_extraction_job_id');
+        if (savedJobId) {
+          startPolling(savedJobId);
+        } else {
+          // No job ID to poll — treat as done if we have results
+          setStep(collectedResults.length > 0 ? 'done' : 'config');
+          setExtracting(false);
+          if (collectedResults.length > 0) {
+            onRuleSetSaved?.();
+            toast('success', 'Rule extraction complete');
+          }
         }
       }
     } catch (e: unknown) {
