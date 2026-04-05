@@ -407,11 +407,12 @@ async def evaluate_geo_multi(
     if queries:
         # ── Batch mode: evaluate each query individually ──────────────────────
         # Flatten all (query × model) tasks into one gather for maximum parallelism
+        # Always force-include index 0 (the user's article) so the GE always sees it
         tasks = []
         task_keys: list[tuple[str, str]] = []
         for q in queries:
-            ro = bm25_retrieve(q, corpus_orig, k)
-            ropt = bm25_retrieve(q, corpus_opt, k)
+            ro = bm25_retrieve(q, corpus_orig, k, force_include=[0])
+            ropt = bm25_retrieve(q, corpus_opt, k, force_include=[0])
             for m in unique_models:
                 tasks.append(_eval_single_model(
                     original_content, rewritten_content,
@@ -465,8 +466,8 @@ async def evaluate_geo_multi(
             on_progress(0, 1, None)
         query = test_query or await generate_test_query(original_content)
 
-        retrieved_orig = bm25_retrieve(query, corpus_orig, k)
-        retrieved_opt = bm25_retrieve(query, corpus_opt, k)
+        retrieved_orig = bm25_retrieve(query, corpus_orig, k, force_include=[0])
+        retrieved_opt = bm25_retrieve(query, corpus_opt, k, force_include=[0])
 
         results = list(await asyncio.gather(*[
             _eval_single_model(

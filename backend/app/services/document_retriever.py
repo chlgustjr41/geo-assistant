@@ -47,8 +47,19 @@ async def generate_synthetic_competitors(
     return docs
 
 
-def bm25_retrieve(query: str, documents: list[str], top_k: int) -> list[tuple[int, str]]:
-    """Return (original_index, doc_text) pairs ranked by BM25 score for the query."""
+def bm25_retrieve(
+    query: str,
+    documents: list[str],
+    top_k: int,
+    force_include: list[int] | None = None,
+) -> list[tuple[int, str]]:
+    """Return (original_index, doc_text) pairs ranked by BM25 score for the query.
+
+    If force_include is given, those document indices are guaranteed to appear in
+    the result (in their BM25-ranked position, or appended at the natural rank if
+    they would otherwise be cut off).  The remaining top_k − len(force_include)
+    slots are filled by the highest-scoring non-forced documents.
+    """
     try:
         from rank_bm25 import BM25Okapi
     except ImportError:
@@ -61,4 +72,26 @@ def bm25_retrieve(query: str, documents: list[str], top_k: int) -> list[tuple[in
     scores = bm25.get_scores(tokenized_query)
 
     ranked = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
-    return [(i, documents[i]) for i in ranked[:top_k]]
+
+    if not force_include:
+        return [(i, documents[i]) for i in ranked[:top_k]]
+
+    forced = set(force_include)
+    result: list[int] = []
+    for i in ranked:
+        if len(result) >= top_k:
+            break
+        if i in forced:
+            result.append(i)
+            forced.discard(i)
+        elif len(result) + len(forced) < top_k:
+            # Only add a non-forced doc if there's room after reserving
+            # slots for any forced docs not yet encountered
+            result.append(i)
+
+    # If any forced indices were never reached (extremely low BM25), append them
+    for i in forced:
+        if len(result) < top_k:
+            result.append(i)
+
+    return [(i, documents[i]) for i in result]
