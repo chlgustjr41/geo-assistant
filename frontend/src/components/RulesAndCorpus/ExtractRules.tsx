@@ -266,6 +266,7 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
       const decoder = new TextDecoder();
 
       let streamCompleted = false;
+      let knownModelTotal = selectedModels.length;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -279,6 +280,7 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
               // just track the in-memory job_id for SSE fallback polling
               if (data.job_id) sessionStorage.setItem('geo_extraction_job_id', data.job_id);
             } else if (data.stage) {
+              if (data.model_total) knownModelTotal = data.model_total;
               setProgress({ stage: data.stage, completed: data.completed, total: data.total, model: data.model ?? '', model_index: data.model_index ?? 0, model_total: data.model_total ?? 1 });
             } else if (data.status === 'model_complete') {
               collectedResults = [...collectedResults, data.result];
@@ -289,13 +291,18 @@ export function ExtractRules({ onRuleSetSaved }: Props) {
               } else {
                 toast('error', `${modelLabel(data.result.model)}: ${data.result.error}`);
               }
+              // All models reported — show completion immediately
+              if (collectedResults.length >= knownModelTotal) {
+                setStep('done');
+                setExtracting(false);
+                toast('success', 'Rule extraction complete');
+              }
             } else if (data.status === 'complete') {
               streamCompleted = true;
               sessionStorage.removeItem('geo_extraction_job_id');
               setStep('done');
               setExtracting(false);
               onRuleSetSaved?.();
-              toast('success', 'Rule extraction complete');
               // Clean up persistent active-job flag
               jobsApi.listActive().then(({ active_jobs }) => {
                 active_jobs
