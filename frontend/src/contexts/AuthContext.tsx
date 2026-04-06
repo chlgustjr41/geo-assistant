@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import {
   onAuthStateChanged,
+  signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
   signOut as firebaseSignOut,
@@ -91,10 +92,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setError(null);
     setAccessDenied(false);
     try {
-      await signInWithRedirect(auth, googleProvider);
+      // Try popup first (works on most desktop browsers)
+      await signInWithPopup(auth, googleProvider);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Sign-in failed';
-      setError(msg);
+      // If popup was blocked or failed, fall back to redirect
+      const code = (e as { code?: string })?.code;
+      if (code === 'auth/popup-blocked' || code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        try {
+          await signInWithRedirect(auth, googleProvider);
+        } catch (redirectErr: unknown) {
+          const msg = redirectErr instanceof Error ? redirectErr.message : 'Sign-in failed';
+          setError(msg);
+        }
+      } else {
+        const msg = e instanceof Error ? e.message : 'Sign-in failed';
+        setError(msg);
+      }
     }
   };
 
