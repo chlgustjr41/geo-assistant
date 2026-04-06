@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import {
   onAuthStateChanged,
-  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut as firebaseSignOut,
   type User,
 } from 'firebase/auth';
@@ -61,6 +62,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!authEnabled) return;
+
+    // Handle redirect result (fires once after returning from Google sign-in)
+    getRedirectResult(auth).catch((e: unknown) => {
+      const msg = e instanceof Error ? e.message : 'Sign-in failed';
+      setError(msg);
+      setLoading(false);
+    });
+
     const unsub = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         // Detect account switch: if a different user signs in, clear stale data
@@ -82,7 +91,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setError(null);
     setAccessDenied(false);
     try {
-      await signInWithPopup(auth, googleProvider);
+      await signInWithRedirect(auth, googleProvider);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Sign-in failed';
       setError(msg);
