@@ -108,7 +108,7 @@ geo-assistant/
 | Component | Service | Details |
 |-----------|---------|---------|
 | Frontend | Firebase Hosting | `geo-rewrite-assistant.web.app` |
-| Backend | GCP VM `personal-project-machine` | project `personal-server`, us-central1-a |
+| Backend | GCP VM `personal-project-machine` | project `personal-server-492701`, us-east1-b |
 | Backend process | Docker container `geo-assistant-backend` | Uvicorn on container port `8000`, host port `8001` |
 | Reverse proxy | Nginx (on host) | HTTPS (self-signed cert), SSE support, proxy to `127.0.0.1:8001` |
 | Auth | Firebase project `geo-rewrite-assistant` | Google sign-in provider |
@@ -137,7 +137,7 @@ Nginx runs on the host VM (not in a container) and routes to each project's cont
 # /etc/nginx/sites-available/geo-assistant
 server {
     listen 443 ssl;
-    server_name <VM_EXTERNAL_IP>;
+    server_name 35.196.27.90;
     ssl_certificate /etc/ssl/certs/geo-selfsigned.crt;
     ssl_certificate_key /etc/ssl/private/geo-selfsigned.key;
 
@@ -157,7 +157,7 @@ server {
 
 server {
     listen 80;
-    server_name <VM_EXTERNAL_IP>;
+    server_name 35.196.27.90;
     return 301 https://$host$request_uri;
 }
 ```
@@ -167,8 +167,8 @@ server {
 ```bash
 # Backend (Docker — from local machine)
 gcloud compute ssh personal-project-machine \
-  --zone=us-central1-a \
-  --project=personal-server \
+  --zone=us-east1-b \
+  --project=personal-server-492701 \
   --command="cd /opt/geo-assistant && sudo git pull origin master && sudo docker compose up -d --build"
 
 # Backend (on VM directly)

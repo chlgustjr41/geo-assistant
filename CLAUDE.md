@@ -36,8 +36,8 @@ cd frontend && npm run build && npx firebase deploy --only hosting
 # Backend → GCP VM (project: personal-server, instance: personal-project-machine)
 # The backend runs as a Docker container alongside other project backends.
 gcloud compute ssh personal-project-machine \
-  --zone=us-central1-a \
-  --project=personal-server \
+  --zone=us-east1-b \
+  --project=personal-server-492701 \
   --command="cd /opt/geo-assistant && sudo git pull origin master && sudo docker compose up -d --build"
 ```
 
