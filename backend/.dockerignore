@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+data/users/
+data/careyaya_geo.db
+.env
+service-account.json
+logsbackend.log
+.claude/

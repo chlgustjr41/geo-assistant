@@ -33,11 +33,24 @@ npm run build  # TypeScript check + Vite production build
 # Frontend → Firebase Hosting
 cd frontend && npm run build && npx firebase deploy --only hosting
 
-# Backend → GCP VM (project: gen-lang-client-0664573611)
-gcloud compute ssh geo-rewrite-assistant-backend \
+# Backend → GCP VM (project: personal-server, instance: personal-project-machine)
+# The backend runs as a Docker container alongside other project backends.
+gcloud compute ssh personal-project-machine \
   --zone=us-central1-a \
-  --project=gen-lang-client-0664573611 \
-  --command="cd /opt/geo-assistant && sudo git pull origin master && sudo systemctl restart geo-assistant"
+  --project=personal-server \
+  --command="cd /opt/geo-assistant && sudo git pull origin master && sudo docker compose up -d --build"
+```
+
+### Docker (Backend)
+```bash
+# Local build & run
+docker compose up -d --build
+
+# View logs
+docker compose logs -f geo-assistant-backend
+
+# Stop
+docker compose down
 ```
 
 ## Architecture
@@ -50,7 +63,7 @@ gcloud compute ssh geo-rewrite-assistant-backend \
 - **LLM APIs:** OpenAI, Google Gemini, Anthropic Claude (unified via `llm_client.py`)
 - **Retrieval:** rank-bm25 for GEO evaluation document ranking
 - **Search:** ddgs (DuckDuckGo) for corpus document discovery
-- **Hosting:** Firebase Hosting (frontend) + GCP e2-micro VM (backend, Nginx HTTPS reverse proxy)
+- **Hosting:** Firebase Hosting (frontend) + GCP VM `personal-project-machine` (Docker container, Nginx HTTPS reverse proxy)
 
 ### Key Architecture Decisions
 - **Per-user databases** — each authenticated user gets their own SQLite DB. Complete data isolation.

@@ -108,41 +108,41 @@ geo-assistant/
 | Component | Service | Details |
 |-----------|---------|---------|
 | Frontend | Firebase Hosting | `geo-rewrite-assistant.web.app` |
-| Backend | GCP VM `geo-rewrite-assistant-backend` | e2-micro, Ubuntu 22.04, us-central1-a |
-| Backend process | systemd `geo-assistant.service` | Uvicorn on `127.0.0.1:8000` |
-| Reverse proxy | Nginx | HTTPS (self-signed cert), SSE support, proxy to :8000 |
+| Backend | GCP VM `personal-project-machine` | project `personal-server`, us-central1-a |
+| Backend process | Docker container `geo-assistant-backend` | Uvicorn on container port `8000`, host port `8001` |
+| Reverse proxy | Nginx (on host) | HTTPS (self-signed cert), SSE support, proxy to `127.0.0.1:8001` |
 | Auth | Firebase project `geo-rewrite-assistant` | Google sign-in provider |
 
-### Backend VM Setup
+### Backend VM Setup (Docker)
+
+The backend runs as a Docker container on the shared `personal-project-machine` VM. Multiple project backends coexist on this VM, each in its own container with a unique host port.
 
 ```bash
-# Systemd service (/etc/systemd/system/geo-assistant.service)
-[Unit]
-Description=GEO Assistant Backend
-After=network.target
-
-[Service]
-User=root
-WorkingDirectory=/opt/geo-assistant/backend
-ExecStart=/opt/geo-assistant/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
-Restart=always
-EnvironmentFile=/opt/geo-assistant/backend/.env
-
-[Install]
-WantedBy=multi-user.target
+# On the VM: /opt/geo-assistant/
+├── backend/
+│   ├── Dockerfile
+│   ├── .env              # API keys, whitelist, CORS (not in git)
+│   └── service-account.json  # Firebase Admin SDK (not in git)
+├── docker-compose.yml
+└── ...
 ```
 
-### Nginx Configuration
+The container maps host port `8001` → container port `8000`. User data persists in a named Docker volume `geo-assistant-data`.
+
+### Nginx Configuration (on host)
+
+Nginx runs on the host VM (not in a container) and routes to each project's container by port.
 
 ```nginx
+# /etc/nginx/sites-available/geo-assistant
 server {
     listen 443 ssl;
-    server_name 34.29.91.25;
+    server_name <VM_EXTERNAL_IP>;
     ssl_certificate /etc/ssl/certs/geo-selfsigned.crt;
     ssl_certificate_key /etc/ssl/private/geo-selfsigned.key;
 
     location / {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:8001;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -157,7 +157,7 @@ server {
 
 server {
     listen 80;
-    server_name 34.29.91.25;
+    server_name <VM_EXTERNAL_IP>;
     return 301 https://$host$request_uri;
 }
 ```
@@ -165,21 +165,24 @@ server {
 ### Deploy Commands
 
 ```bash
-# Backend (on VM)
+# Backend (Docker — from local machine)
+gcloud compute ssh personal-project-machine \
+  --zone=us-central1-a \
+  --project=personal-server \
+  --command="cd /opt/geo-assistant && sudo git pull origin master && sudo docker compose up -d --build"
+
+# Backend (on VM directly)
 cd /opt/geo-assistant
 sudo git pull origin master
-sudo systemctl restart geo-assistant
+sudo docker compose up -d --build
+
+# View container logs
+sudo docker compose logs -f geo-assistant-backend
 
 # Frontend (from local machine)
 cd frontend
 npm run build
 npx firebase deploy --only hosting
-
-# Or use gcloud SSH for remote backend deploy:
-gcloud compute ssh geo-rewrite-assistant-backend \
-  --zone=us-central1-a \
-  --project=gen-lang-client-0664573611 \
-  --command="cd /opt/geo-assistant && sudo git pull origin master && sudo systemctl restart geo-assistant"
 ```
 
 ---
